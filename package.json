@@ -1,0 +1,18 @@
+{
+  "name": "classpilot-ai-website",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A browser-based academic planner for course syllabi, Canvas assignments, screenshots, and student workplans.",
+  "scripts": {
+    "test": "node --test tests/logic.test.js",
+    "start": "python3 -m http.server 4173 --bind 127.0.0.1"
+  },
+  "keywords": [
+    "education",
+    "student-planner",
+    "canvas",
+    "syllabus",
+    "ocr"
+  ],
+  "license": "UNLICENSED"
+}
