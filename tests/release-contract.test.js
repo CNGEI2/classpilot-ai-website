@@ -7,6 +7,11 @@ const workflow = fs.readFileSync(
   path.join(__dirname, "..", ".github", "workflows", "pages.yml"),
   "utf8"
 );
+const readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
+const workerReadmePath = path.join(__dirname, "..", "worker", "README.md");
+const frontendRuntime = ["index.html", "app.js", "logic.js", "planner.js", "file-readers.js", "coach.js"]
+  .map((file) => fs.readFileSync(path.join(__dirname, "..", file), "utf8"))
+  .join("\n");
 
 function jobSection(name, nextName) {
   const start = workflow.indexOf("  " + name + ":");
@@ -36,7 +41,20 @@ test("Pages workflow uses least privilege and packages the verified runtime", ()
   assert.match(deployJob, /rm -rf site-dist/);
   assert.match(
     deployJob,
-    /cp index\.html app\.js logic\.js planner\.js file-readers\.js styles\.css \.nojekyll site-dist\//
+    /cp index\.html app\.js logic\.js planner\.js file-readers\.js coach\.js styles\.css \.nojekyll site-dist\//
   );
   assert.match(deployJob, /cp -R vendor site-dist\/vendor/);
+});
+
+test("release documentation explains the secure Coach boundary", () => {
+  assert.equal(fs.existsSync(workerReadmePath), true);
+  const workerReadme = fs.readFileSync(workerReadmePath, "utf8");
+  assert.match(readme, /conversational AI Coach/i);
+  assert.match(readme, /selected course and assignment context/i);
+  assert.match(readme, /Cloudflare Worker/i);
+  assert.match(workerReadme, /wrangler secret put OPENAI_API_KEY/);
+  assert.match(workerReadme, /COACH_MODE.*mock/s);
+  assert.match(workerReadme, /COACH_MODE.*live/s);
+  assert.match(workerReadme, /ALLOWED_ORIGIN/);
+  assert.doesNotMatch(frontendRuntime, /OPENAI_API_KEY/);
 });

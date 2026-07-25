@@ -1,0 +1,5 @@
+OPENAI_API_KEY=add_your_key_with_wrangler_secret
+ALLOWED_ORIGIN=http://127.0.0.1:4173
+COACH_MODE=mock
+OPENAI_MODEL=gpt-5-mini
+ENVIRONMENT=development

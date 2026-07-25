@@ -28,6 +28,12 @@ const {
   upsertCourseFromDraft
 } = window.ClassPilotLogic;
 const { readImportFile } = window.ClassPilotFileReaders;
+const {
+  buildCoachContext,
+  coachThreadKey,
+  createThreadStore,
+  createCoachClient
+} = window.ClassPilotCoach;
 
 const WORKSPACE_KEY = "classpilot-workspace-v7";
 const LEGACY_KEY = "classpilot-user-courses-v6";
@@ -39,6 +45,19 @@ const NAV_ITEMS = [
   ["data", "database", "Data"]
 ];
 const COURSE_COLORS = ["#376f92", "#16766f", "#c95545", "#705b8f", "#c79419"];
+const COACH_QUICK_ACTIONS = {
+  explain: "Explain this assignment and show me the exact requirements.",
+  chat: "What should I do next?",
+  check: "Check which requirements I still need to complete.",
+  plan: "Make a practical plan for completing this work."
+};
+const coachEndpoint = document
+  .querySelector('meta[name="classpilot-coach-endpoint"]')
+  ?.getAttribute("content")
+  ?.trim() || "";
+const coachMockMode = /(?:^|[?&])coach=mock(?:&|$)/i.test(
+  String(window.location.search || "")
+);
 
 const elements = {
   appNav: document.querySelector("#appNav"),
@@ -116,6 +135,9 @@ let undoTimer;
 let pendingBackup;
 let backupPreviewOperation = 0;
 let clearWorkspaceConfirmationPending = false;
+let coachThreadStore;
+let activeCoachRequest;
+const coachViewStates = new Map();
 const dialogOpeners = new WeakMap();
 
 function escapeHtml(value) {
@@ -750,6 +772,11 @@ function renderSelectedAssignmentDetail(course, assignment) {
         renderAssignmentTasks(course, assignment) +
       "</section>" +
       '<div class="dialog-actions">' +
+        '<button type="button" class="primary-action" data-open-coach' +
+          ' data-course-id="' + escapeHtml(course.id) + '" data-assignment-id="' +
+          escapeHtml(assignment.id) + '">' +
+          '<i data-lucide="message-circle" aria-hidden="true"></i>' +
+          "<span>Ask Coach</span></button>" +
         '<button type="button" data-edit-assignment data-course-id="' +
           escapeHtml(course.id) + '" data-assignment-id="' +
           escapeHtml(assignment.id) + '">Edit assignment</button>' +
@@ -988,22 +1015,348 @@ function renderCoach(course) {
   const assignment = (course.assignments || []).find(
     (item) => item.id === state.selectedAssignmentId
   );
-  const coach = assignment
+  const localGuidance = assignment
     ? buildAssignmentCoach(course, assignment, workspace.preferences.language)
     : buildCourseCoach(course, workspace.preferences.language);
-  const priorities = coach.nextSteps || coach.priorities || coach.studyFocus || [];
+  const priorities = [
+    ...(localGuidance.mustDo || []),
+    ...(localGuidance.nextSteps || localGuidance.priorities ||
+      localGuidance.studyFocus || [])
+  ].slice(0, 8);
+  const assignmentId = assignment?.id || "";
+  const threadKey = coachThreadKey(course.id, assignmentId);
+  const messages = coachThreadStore?.get(course.id, assignmentId) || [];
+  const viewState = coachViewStates.get(threadKey) || {};
+  const language = ["en", "zh", "bilingual"].includes(workspace.preferences.language)
+    ? workspace.preferences.language
+    : "en";
+  const contextLabel = assignment
+    ? assignment.title || "Current assignment"
+    : course.name || course.code || "Course guidance";
+  const connectionLabel = coachMockMode
+    ? "Mock mode"
+    : coachEndpoint ? "Live AI connected" : "Live AI not connected";
+  const connectionClass = coachMockMode
+    ? "is-mock"
+    : coachEndpoint ? "is-live" : "is-offline";
+  const transcript = messages.length
+    ? messages.map(renderCoachMessage).join("")
+    : '<div class="coach-empty">' +
+        '<p class="coach-empty-label">Start with the work in front of you</p>' +
+        "<p>" + escapeHtml(localGuidance.summary || localGuidance.title || "") + "</p>" +
+        renderAssignmentDetailList(
+          priorities,
+          "Import course material to receive local planning guidance."
+        ) +
+      "</div>";
   return (
-    '<section aria-labelledby="courseCoachHeading">' +
-      '<p class="assignment-kicker">' + escapeHtml(course.code || "Course") +
+    '<section class="coach-workspace" aria-labelledby="courseCoachHeading">' +
+      '<header class="coach-header">' +
+        "<div>" +
+          '<p class="assignment-kicker">' + escapeHtml(course.code || "Course") + "</p>" +
+          '<h2 id="courseCoachHeading">Coach</h2>' +
+          '<p class="coach-context-label">Ask about ' + escapeHtml(contextLabel) + "</p>" +
+        "</div>" +
+        '<span class="coach-connection ' + connectionClass + '">' +
+          escapeHtml(connectionLabel) + "</span>" +
+      "</header>" +
+      (assignment
+        ? '<dl class="coach-context-strip">' +
+            "<div><dt>Assignment</dt><dd>" + escapeHtml(assignment.title || "Untitled") + "</dd></div>" +
+            "<div><dt>Due</dt><dd>" + escapeHtml(assignment.dueDate || "No date") + "</dd></div>" +
+            "<div><dt>Points</dt><dd>" + escapeHtml(assignment.points || "Not listed") + "</dd></div>" +
+          "</dl>"
+        : '<p class="coach-course-context">Course-level guidance uses only this course\'s syllabus summary.</p>') +
+      '<div class="coach-quick-actions" role="group" aria-label="Coach quick questions">' +
+        coachQuickActionButton("explain", "list-checks", "Explain assignment") +
+        coachQuickActionButton("chat", "arrow-right", "What next?") +
+        coachQuickActionButton("check", "scan-search", "Check requirements") +
+        coachQuickActionButton("plan", "calendar-clock", "Make a plan") +
+      "</div>" +
+      '<div class="coach-transcript" aria-live="polite" aria-label="Coach conversation">' +
+        transcript +
+      "</div>" +
+      (viewState.error
+        ? '<p class="coach-request-status is-error" role="alert">' + escapeHtml(viewState.error) + "</p>"
+        : viewState.pending
+          ? '<p class="coach-request-status" role="status">Coach is reading this assignment...</p>'
+          : "") +
+      '<form class="coach-composer" data-coach-form>' +
+        '<label class="coach-language">Language' +
+          '<select data-coach-language name="coachLanguage" aria-label="Coach response language">' +
+            coachLanguageOption("en", "English", language) +
+            coachLanguageOption("zh", "中文", language) +
+            coachLanguageOption("bilingual", "Bilingual", language) +
+          "</select></label>" +
+        '<label class="coach-question"><span class="visually-hidden">Question for Coach</span>' +
+          '<textarea name="coachQuestion" maxlength="4000" required' +
+            ' aria-label="Question for Coach" placeholder="Ask about ' +
+            escapeHtml(contextLabel) + '"></textarea></label>' +
+        '<div class="coach-composer-actions">' +
+          '<button type="submit" class="primary-action"' +
+            (viewState.pending ? " disabled" : "") + ' aria-label="Send question to Coach">' +
+            '<i data-lucide="send" aria-hidden="true"></i><span>Send</span></button>' +
+          '<button type="button" data-coach-stop' +
+            (viewState.pending ? "" : " hidden") +
+            ' aria-label="Stop Coach response" title="Stop Coach response">' +
+            '<i data-lucide="square" aria-hidden="true"></i></button>' +
+          '<button type="button" data-coach-clear' +
+            (messages.length ? "" : " disabled") +
+            ' aria-label="Clear this Coach conversation" title="Clear this Coach conversation">' +
+            '<i data-lucide="trash-2" aria-hidden="true"></i></button>' +
+        "</div>" +
+      "</form>" +
+      '<p class="coach-privacy"><i data-lucide="shield-check" aria-hidden="true"></i>' +
+        "Selected course context is sent only when you ask. Conversations stay in this browser." +
       "</p>" +
-      '<h2 id="courseCoachHeading">Coach</h2>' +
-      "<p>" + escapeHtml(coach.summary || coach.title || "") + "</p>" +
-      renderAssignmentDetailList(
-        priorities,
-        "Import course material to receive deterministic planning guidance."
-      ) +
+      (!coachEndpoint && !coachMockMode
+        ? '<p class="coach-setup-note">Live AI requires the secure Coach backend. No API key belongs in this browser.</p>'
+        : coachMockMode
+          ? '<p class="coach-setup-note">Mock responses are deterministic test guidance, not live AI.</p>'
+          : "") +
     "</section>"
   );
+}
+
+function coachQuickActionButton(action, icon, label) {
+  return '<button type="button" data-coach-action="' + action + '">' +
+    '<i data-lucide="' + icon + '" aria-hidden="true"></i><span>' +
+    escapeHtml(label) + "</span></button>";
+}
+
+function coachLanguageOption(value, label, selected) {
+  return '<option value="' + value + '"' +
+    (value === selected ? " selected" : "") + ">" + label + "</option>";
+}
+
+function renderCoachMessage(message) {
+  const assistant = message.role === "assistant";
+  const evidence = assistant && Array.isArray(message.evidence) && message.evidence.length
+    ? '<div class="coach-evidence"><strong>Based on your course material</strong><ul>' +
+        message.evidence.map((item) => (
+          "<li><span>" + escapeHtml(item.label) + "</span>" +
+            escapeHtml(item.text) + "</li>"
+        )).join("") + "</ul></div>"
+    : "";
+  const nextSteps = assistant && Array.isArray(message.nextSteps) && message.nextSteps.length
+    ? '<div class="coach-next-steps"><strong>Next steps</strong><ol>' +
+        message.nextSteps.map((item) => "<li>" + escapeHtml(item) + "</li>").join("") +
+      "</ol></div>"
+    : "";
+  const mode = assistant && message.mode === "mock"
+    ? '<span class="coach-message-mode">Mock</span>'
+    : "";
+  return '<article class="coach-message ' + (assistant ? "is-assistant" : "is-user") + '">' +
+    '<header><strong>' + (assistant ? "ClassPilot Coach" : "You") + "</strong>" + mode + "</header>" +
+    '<p class="coach-message-text">' + escapeHtml(message.text) + "</p>" +
+    evidence + nextSteps +
+  "</article>";
+}
+
+function coachTarget(course) {
+  const assignment = (course.assignments || []).find(
+    (item) => item.id === state.selectedAssignmentId
+  ) || null;
+  return {
+    assignment,
+    assignmentId: assignment?.id || "",
+    threadKey: coachThreadKey(course.id, assignment?.id || "")
+  };
+}
+
+function renderCoachIfActive(courseId, assignmentId) {
+  const activeCourse = getActiveCourse();
+  if (
+    state.activeView !== "courses" ||
+    state.activeCourseTab !== "coach" ||
+    activeCourse?.id !== courseId ||
+    (state.selectedAssignmentId || "") !== (assignmentId || "")
+  ) {
+    return;
+  }
+  renderCoursesView();
+  refreshIcons();
+}
+
+function buildLocalMockCoachResponse(course, assignment, action) {
+  const language = workspace.preferences.language || "en";
+  const guidance = assignment
+    ? buildAssignmentCoach(course, assignment, language)
+    : buildCourseCoach(course, language);
+  const detailRequirements = assignment?.details?.requirements || [];
+  const rubric = assignment?.details?.rubric || [];
+  const evidence = [
+    ...detailRequirements.slice(0, 3).map((text) => ({ label: "Requirement", text })),
+    ...rubric.slice(0, Math.max(0, 3 - detailRequirements.length)).map((item) => ({
+      label: item.weight ? "Rubric " + item.weight : "Rubric",
+      text: [item.label, item.description].filter(Boolean).join(": ")
+    }))
+  ];
+  const guidanceSteps = guidance.nextSteps || guidance.priorities || guidance.studyFocus || [];
+  const actionLead = {
+    explain: "The uploaded material has been organized into requirements and deliverables.",
+    check: "Compare your current work with every requirement below.",
+    plan: "Work through the next steps in order and mark each one complete.",
+    chat: "Start with the first incomplete step, then check the original instructions again."
+  }[action] || "Use the uploaded instructions as your source of truth.";
+  return {
+    answer: "Mock mode: " + (guidance.summary || guidance.title || actionLead) + " " + actionLead,
+    evidence,
+    nextSteps: guidanceSteps.slice(0, 5),
+    missingInformation: detailRequirements.length || !assignment
+      ? []
+      : ["No assignment requirements were detected."],
+    usage: { inputTokens: 0, outputTokens: 0 },
+    mode: "mock"
+  };
+}
+
+async function submitCoachQuestion(course, assignment, question, action = "chat") {
+  const text = String(question || "").trim().slice(0, 4000);
+  if (!course || !text || !coachThreadStore) return false;
+  const assignmentId = assignment?.id || "";
+  const threadKey = coachThreadKey(course.id, assignmentId);
+  coachThreadStore.append(course.id, assignmentId, {
+    role: "user",
+    text,
+    timestamp: new Date().toISOString()
+  });
+  const controller = new AbortController();
+  activeCoachRequest?.controller?.abort();
+  activeCoachRequest = { controller, threadKey };
+  coachViewStates.set(threadKey, { pending: true, error: "" });
+  renderCoachIfActive(course.id, assignmentId);
+
+  try {
+    const context = buildCoachContext(
+      course,
+      assignment,
+      workspace.preferences.language || "en",
+      action
+    );
+    const messages = coachThreadStore.get(course.id, assignmentId);
+    const response = coachMockMode
+      ? await Promise.resolve(buildLocalMockCoachResponse(course, assignment, action))
+      : await createCoachClient({ endpoint: coachEndpoint }).send({
+          context,
+          messages,
+          signal: controller.signal
+        });
+    if (controller.signal.aborted) return false;
+    coachThreadStore.append(course.id, assignmentId, {
+      role: "assistant",
+      text: response.answer,
+      evidence: response.evidence,
+      nextSteps: response.nextSteps,
+      missingInformation: response.missingInformation,
+      mode: response.mode,
+      timestamp: new Date().toISOString()
+    });
+    coachViewStates.set(threadKey, { pending: false, error: "" });
+    showStatus(
+      response.mode === "mock"
+        ? "Mock Coach response generated for interface testing."
+        : "Coach response received.",
+      response.mode === "mock" ? "info" : "success"
+    );
+    return true;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      coachViewStates.set(threadKey, { pending: false, error: "Coach response stopped." });
+      return false;
+    }
+    coachViewStates.set(threadKey, {
+      pending: false,
+      error: error?.message || "The AI Coach could not complete this request."
+    });
+    showStatus(error?.message || "The AI Coach could not complete this request.", "warn");
+    return false;
+  } finally {
+    if (activeCoachRequest?.threadKey === threadKey) activeCoachRequest = undefined;
+    renderCoachIfActive(course.id, assignmentId);
+  }
+}
+
+function openAssignmentCoach(courseId, assignmentId) {
+  const course = workspace.courses.find((item) => item.id === courseId);
+  const assignment = course?.assignments?.find((item) => item.id === assignmentId);
+  if (!course || !assignment) return false;
+  if (!persistWorkspacePreferences({
+    activeCourseId: course.id,
+    activeView: "courses"
+  })) {
+    return false;
+  }
+  state.activeCourseTab = "coach";
+  state.selectedAssignmentId = assignment.id;
+  renderCourseRail();
+  navigateToView("courses", { persist: false });
+  showStatus("Coach is using " + assignment.title + " from " +
+    (course.code || course.name || "the selected course") + ".");
+  return true;
+}
+
+function handleCoachFormSubmit(event) {
+  const form = event.target.closest?.("[data-coach-form]") || event.currentTarget;
+  if (!form?.matches?.("[data-coach-form]") && !form?.dataset?.coachForm) return;
+  event.preventDefault();
+  const course = getActiveCourse();
+  if (!course) return;
+  const assignment = coachTarget(course).assignment;
+  const questionControl = form.elements?.namedItem?.("coachQuestion") ||
+    form.querySelector?.('[name="coachQuestion"]');
+  const question = questionControl?.value || "";
+  if (!question.trim()) return;
+  questionControl.value = "";
+  void submitCoachQuestion(course, assignment, question, "chat");
+}
+
+function handleCoachLanguageChange(event) {
+  const select = event.target.closest("[data-coach-language]");
+  if (!select) return false;
+  const language = ["en", "zh", "bilingual"].includes(select.value)
+    ? select.value
+    : "en";
+  if (!persistWorkspacePreferences({ language })) {
+    select.value = workspace.preferences.language || "en";
+    return true;
+  }
+  renderCoursesView();
+  refreshIcons();
+  return true;
+}
+
+function askCoachQuickQuestion(action) {
+  const course = getActiveCourse();
+  if (!course) return false;
+  const assignment = coachTarget(course).assignment;
+  return submitCoachQuestion(
+    course,
+    assignment,
+    COACH_QUICK_ACTIONS[action] || COACH_QUICK_ACTIONS.chat,
+    action
+  );
+}
+
+function stopCoachResponse() {
+  if (!activeCoachRequest) return false;
+  activeCoachRequest.controller.abort();
+  return true;
+}
+
+function clearCoachConversation() {
+  const course = getActiveCourse();
+  if (!course || !coachThreadStore) return false;
+  const target = coachTarget(course);
+  if (activeCoachRequest?.threadKey === target.threadKey) {
+    activeCoachRequest.controller.abort();
+  }
+  coachThreadStore.clear(course.id, target.assignmentId);
+  coachViewStates.delete(target.threadKey);
+  renderCoursesView();
+  refreshIcons();
+  showStatus("This Coach conversation was cleared.", "success");
+  return true;
 }
 
 function renderCoursesView() {
@@ -1068,7 +1421,7 @@ function activateCourseTab(value, shouldFocus = false) {
   state.activeCourseTab = ["assignments", "syllabus", "coach"].includes(value)
     ? value
     : "assignments";
-  state.selectedAssignmentId = "";
+  if (state.activeCourseTab !== "coach") state.selectedAssignmentId = "";
   renderCoursesView();
   refreshIcons();
   if (shouldFocus) {
@@ -2584,6 +2937,31 @@ function handleDocumentClick(event) {
     return;
   }
 
+  const assignmentCoach = event.target.closest("[data-open-coach]");
+  if (assignmentCoach) {
+    openAssignmentCoach(
+      assignmentCoach.dataset.courseId,
+      assignmentCoach.dataset.assignmentId
+    );
+    return;
+  }
+
+  const coachAction = event.target.closest("[data-coach-action]");
+  if (coachAction) {
+    void askCoachQuickQuestion(coachAction.dataset.coachAction);
+    return;
+  }
+
+  if (event.target.closest("[data-coach-stop]")) {
+    stopCoachResponse();
+    return;
+  }
+
+  if (event.target.closest("[data-coach-clear]")) {
+    clearCoachConversation();
+    return;
+  }
+
   const calendarMonth = event.target.closest("[data-calendar-month]");
   if (calendarMonth) {
     state.calendarCursor = new Date(
@@ -2724,6 +3102,7 @@ function handleHistoryRoute() {
 
 function initialize() {
   workspace = loadWorkspace();
+  coachThreadStore = createThreadStore(localStorage);
 
   if (
     !workspace.courses.some(
@@ -2793,7 +3172,10 @@ elements.importDropZone.addEventListener("dragover", (event) => {
 });
 elements.importDropZone.addEventListener("drop", handleImportDrop);
 elements.courseWorkspace.addEventListener("input", handleAssignmentFilterChange);
-elements.courseWorkspace.addEventListener("change", handleAssignmentFilterChange);
+elements.courseWorkspace.addEventListener("change", (event) => {
+  if (!handleCoachLanguageChange(event)) handleAssignmentFilterChange(event);
+});
+elements.courseWorkspace.addEventListener("submit", handleCoachFormSubmit);
 elements.importDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
   cancelImport();

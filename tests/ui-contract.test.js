@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const coach = require("../coach.js");
 const logic = require("../logic.js");
 const planner = require("../planner.js");
 
@@ -223,6 +224,16 @@ class FakeElement {
       this.dataset.calendarMonth !== undefined) return this;
     if (selector === "[data-select-course]" &&
       this.dataset.selectCourse !== undefined) return this;
+    if (selector === "[data-open-coach]" &&
+      this.dataset.openCoach !== undefined) return this;
+    if (selector === "[data-coach-action]" &&
+      this.dataset.coachAction !== undefined) return this;
+    if (selector === "[data-coach-stop]" &&
+      this.dataset.coachStop !== undefined) return this;
+    if (selector === "[data-coach-clear]" &&
+      this.dataset.coachClear !== undefined) return this;
+    if (selector === "[data-coach-language]" &&
+      this.dataset.coachLanguage !== undefined) return this;
     return null;
   }
 }
@@ -448,6 +459,10 @@ class FakeStorage {
     this.values.set(key, serialized);
     this.writes.push([key, serialized]);
   }
+
+  removeItem(key) {
+    this.values.delete(key);
+  }
 }
 
 function createWorkspace(courses = [], preferences = {}) {
@@ -572,6 +587,7 @@ function runApp({
   workspaceRaw,
   legacyRaw,
   hash = "",
+  search = "",
   now,
   failWrites = false,
   logicApi = logic,
@@ -595,7 +611,7 @@ function runApp({
   const document = new FakeDocument();
   const localStorage = new FakeStorage(initial);
   localStorage.failWrites = failWrites;
-  const location = { hash };
+  const location = { hash, search };
   const listeners = {};
   const errors = [];
   const animationFrames = [];
@@ -623,6 +639,7 @@ function runApp({
     Blob,
     DOMException,
     ClassPilotFileReaders: fileReaderApi,
+    ClassPilotCoach: coach,
     ClassPilotLogic: logicApi,
     ClassPilotPlanner: planner,
     console: {
@@ -4208,6 +4225,77 @@ test("course tabs provide semantic panels and roving keyboard navigation", async
   assert.equal(selected.dataset.courseTab, "assignments");
   selected = await pressTabKey("ArrowLeft");
   assert.equal(selected.dataset.courseTab, "coach");
+});
+
+test("the Coach runtime loads before app.js and exposes the complete conversation controls", () => {
+  const coachScript = html.indexOf('src="coach.js?v=16"');
+  const appScript = html.indexOf('src="app.js?v=16"');
+  assert.ok(coachScript > 0);
+  assert.ok(appScript > coachScript);
+  assert.match(html, /name="classpilot-coach-endpoint"/);
+  assert.match(appSource, /buildCoachContext/);
+  assert.match(appSource, /createThreadStore/);
+  assert.match(appSource, /coachQuickActionButton\("explain"/);
+  assert.match(appSource, /coachQuickActionButton\("check"/);
+  assert.match(appSource, /coachQuickActionButton\("plan"/);
+  assert.match(appSource, /data-coach-form/);
+  assert.match(appSource, /data-coach-stop/);
+  assert.match(appSource, /data-coach-clear/);
+  assert.match(appSource, /data-coach-language/);
+  assert.match(appSource, /Selected course context is sent only when you ask/);
+});
+
+test("opening Coach from an assignment preserves that exact assignment context", () => {
+  const course = editableCourse();
+  const app = runApp({
+    workspaceRaw: JSON.stringify(createWorkspace([course]))
+  });
+
+  app.context.openAssignmentCoach(course.id, course.assignments[0].id);
+  const markup = app.document.elements.get("courseWorkspace").innerHTML;
+  assert.match(markup, /Final lab/);
+  assert.match(markup, /2026-08-01 17:00/);
+  assert.match(markup, /Ask about Final lab/);
+  assert.match(markup, /Build the system/);
+  assert.match(markup, /Live AI not connected/);
+});
+
+test("mock Coach conversations are clearly labeled and separated by assignment", async () => {
+  const course = editableCourse();
+  course.assignments.push({
+    ...course.assignments[0],
+    id: "assignment-2",
+    title: "Second lab"
+  });
+  const app = runApp({
+    search: "?coach=mock",
+    workspaceRaw: JSON.stringify(createWorkspace([course]))
+  });
+
+  await app.context.submitCoachQuestion(
+    course,
+    course.assignments[0],
+    "What should I do first?",
+    "plan"
+  );
+  await app.context.submitCoachQuestion(
+    course,
+    course.assignments[1],
+    "Check the second lab.",
+    "check"
+  );
+
+  const first = JSON.parse(app.localStorage.getItem(
+    "classpilot.coach.v1:course-1:assignment-1"
+  ));
+  const second = JSON.parse(app.localStorage.getItem(
+    "classpilot.coach.v1:course-1:assignment-2"
+  ));
+  assert.equal(first.length, 2);
+  assert.equal(second.length, 2);
+  assert.match(first[1].text, /Mock mode/);
+  assert.equal(first[1].mode, "mock");
+  assert.doesNotMatch(JSON.stringify(first), /Second lab/);
 });
 
 test("click, Enter, and Space focus the replacement active course tab", async () => {

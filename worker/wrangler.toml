@@ -1,0 +1,9 @@
+name = "classpilot-ai-coach"
+main = "worker.mjs"
+compatibility_date = "2026-07-25"
+
+[vars]
+ALLOWED_ORIGIN = "https://cngei2.github.io"
+COACH_MODE = "mock"
+OPENAI_MODEL = "gpt-5-mini"
+ENVIRONMENT = "production"

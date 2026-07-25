@@ -27,6 +27,18 @@
   display: none !important;
 }
 
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
 html {
   min-height: 100%;
   scroll-behavior: smooth;
@@ -975,6 +987,286 @@ h3 {
   color: var(--danger);
 }
 
+.coach-workspace {
+  width: min(100%, 1040px);
+  min-width: 0;
+}
+
+.coach-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--ink);
+}
+
+.coach-header h2 {
+  margin-bottom: 3px !important;
+}
+
+.coach-context-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.coach-connection {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.coach-connection.is-live {
+  border-color: rgba(22, 118, 111, 0.55);
+  background: rgba(22, 118, 111, 0.08);
+  color: var(--teal);
+}
+
+.coach-connection.is-mock {
+  border-color: rgba(199, 148, 25, 0.55);
+  background: rgba(199, 148, 25, 0.09);
+  color: #7c5a09;
+}
+
+.coach-context-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(160px, 0.8fr) minmax(130px, 0.5fr);
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.coach-context-strip > div {
+  min-width: 0;
+  padding: 11px 12px 12px 0;
+}
+
+.coach-context-strip > div + div {
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+.coach-context-strip dt {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.coach-context-strip dd {
+  margin: 3px 0 0;
+  color: var(--ink-2);
+  font-size: 0.82rem;
+}
+
+.coach-course-context,
+.coach-privacy,
+.coach-setup-note {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.coach-course-context {
+  margin: 10px 0 0;
+}
+
+.coach-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 18px 0;
+}
+
+.coach-quick-actions button {
+  min-width: 0;
+  justify-content: flex-start;
+  padding: 9px 10px;
+  font-size: 0.76rem;
+  text-align: left;
+}
+
+.coach-transcript {
+  position: relative;
+  display: grid;
+  gap: 0;
+  min-height: 240px;
+  max-height: 540px;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.coach-empty {
+  align-self: center;
+  max-width: 720px;
+  padding: 32px 28px;
+}
+
+.coach-empty-label {
+  margin-bottom: 7px;
+  color: var(--teal);
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.coach-empty > p:not(.coach-empty-label) {
+  max-width: 680px;
+  color: var(--ink-2);
+}
+
+.coach-empty ul {
+  padding-left: 18px !important;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.coach-message {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  padding: 18px 24px 20px 52px;
+  border-bottom: 1px solid var(--line);
+}
+
+.coach-message:last-child {
+  border-bottom: 0;
+}
+
+.coach-message::before {
+  content: "";
+  position: absolute;
+  top: 22px;
+  left: 22px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--teal);
+  box-shadow: 0 0 0 1px var(--teal);
+}
+
+.coach-message.is-user {
+  background: rgba(55, 111, 146, 0.06);
+}
+
+.coach-message.is-user::before {
+  background: var(--blue);
+  box-shadow: 0 0 0 1px var(--blue);
+}
+
+.coach-message header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+}
+
+.coach-message-mode {
+  color: #7c5a09;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+}
+
+.coach-message-text {
+  max-width: 760px;
+  margin: 0;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+}
+
+.coach-evidence,
+.coach-next-steps {
+  max-width: 780px;
+  margin-top: 6px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--gold);
+  background: rgba(199, 148, 25, 0.07);
+  font-size: 0.8rem;
+}
+
+.coach-next-steps {
+  border-left-color: var(--teal);
+  background: rgba(22, 118, 111, 0.06);
+}
+
+.coach-evidence ul,
+.coach-next-steps ol {
+  margin-top: 6px !important;
+  padding-left: 18px !important;
+}
+
+.coach-evidence li span {
+  display: block;
+  color: #7c5a09;
+  font-size: 0.64rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.coach-request-status {
+  margin: 8px 0 0;
+  color: var(--teal);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.coach-request-status.is-error {
+  color: var(--danger);
+}
+
+.coach-composer {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 14px;
+}
+
+.coach-composer textarea {
+  min-height: 76px;
+  max-height: 180px;
+}
+
+.coach-composer-actions {
+  display: grid;
+  grid-template-columns: auto 40px 40px;
+  gap: 6px;
+}
+
+.coach-composer-actions > button:not(.primary-action) {
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+}
+
+.coach-privacy {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 0 0;
+}
+
+.coach-privacy svg {
+  width: 16px;
+  height: 16px;
+  color: var(--teal);
+}
+
+.coach-setup-note {
+  margin: 5px 0 0;
+}
+
 .calendar-controls {
   display: grid;
   grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) auto auto;
@@ -1586,6 +1878,40 @@ dialog form > div {
 
   .data-actions {
     grid-template-columns: 1fr;
+  }
+
+  .coach-header {
+    display: grid;
+    gap: 10px;
+  }
+
+  .coach-connection {
+    width: fit-content;
+  }
+
+  .coach-context-strip,
+  .coach-quick-actions,
+  .coach-composer {
+    grid-template-columns: 1fr;
+  }
+
+  .coach-context-strip > div,
+  .coach-context-strip > div + div {
+    padding: 9px 0;
+    border-left: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .coach-context-strip > div:last-child {
+    border-bottom: 0;
+  }
+
+  .coach-quick-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .coach-composer-actions {
+    grid-template-columns: minmax(0, 1fr) 40px 40px;
   }
 
   dialog form,

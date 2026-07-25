@@ -9,3 +9,5 @@ dist/
 docs/superpowers/
 .playwright-cli/
 npm-debug.log*
+product-presentation/.build/
+product-presentation/*.inspect.ndjson
