@@ -3200,9 +3200,19 @@ test("Today assignment activation renders the selected assignment in Courses", (
         id: "assignment-1",
         title: "<strong>Final lab</strong>",
         dueAt,
+        points: "20 Points Possible",
         estimateMinutes: 90,
         nextAction: "Draft <one>",
         links: ['<img src=x onerror="alert(4)">'],
+        status: {
+          grading: "Graded",
+          nextUp: "Review Feedback",
+          attempt: "Attempt 1",
+          score: "20/20",
+          attemptsAllowed: "Unlimited Attempts Allowed",
+          submission: "No submission",
+          anonymousGrading: "No"
+        },
         details: {
           requirements: ["Use <two> sources"],
           steps: [{ title: "Check <three>", done: false }]
@@ -3220,6 +3230,17 @@ test("Today assignment activation renders the selected assignment in Courses", (
   assert.match(detail, /&lt;strong&gt;Final lab&lt;\/strong&gt;/);
   assert.ok(detail.includes(app.context.formatAbsoluteDeadline({ dueAt })));
   assert.match(detail, /Estimated 1 hr 30 min/);
+  assert.match(detail, /<dt>Points<\/dt><dd>20 Points Possible<\/dd>/);
+  assert.match(detail, /<dt>Score<\/dt><dd>20\/20<\/dd>/);
+  assert.match(detail, /<dt>Status<\/dt><dd>Graded<\/dd>/);
+  assert.match(detail, /<dt>Canvas next up<\/dt><dd>Review Feedback<\/dd>/);
+  assert.match(detail, /<dt>Attempt<\/dt><dd>Attempt 1<\/dd>/);
+  assert.match(detail, /<dt>Submission<\/dt><dd>No submission<\/dd>/);
+  assert.match(detail, /<dt>Anonymous grading<\/dt><dd>No<\/dd>/);
+  assert.match(
+    detail,
+    /<dt>Attempts allowed<\/dt><dd>Unlimited Attempts Allowed<\/dd>/
+  );
   assert.match(detail, /<dt>Next action<\/dt><dd>Check &lt;three&gt;<\/dd>/);
   assert.match(detail, /Use &lt;two&gt; sources/);
   assert.match(detail, /Check &lt;three&gt;/);

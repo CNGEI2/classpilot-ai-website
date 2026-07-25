@@ -505,7 +505,7 @@ test("createCourseDraftFromMaterial flags low-confidence OCR instead of pretendi
   const draft = createCourseDraftFromMaterial(
     `
       Chrome file edit view history
-      sfbu.instructure.com courses assignments
+      example.instructure.com courses assignments
       Watch this vide0
       Due: Sat Jul 11, 2026 9:00am
       10 Points Possible
@@ -563,6 +563,90 @@ test("createCourseDraftFromMaterial reads a submitted Canvas assignment status p
   assert.ok(draft.evidence.some((item) => item.label === "Submitted" && item.value === "Jul 5, 2026, 12:51 PM"));
   assert.ok(draft.evidence.some((item) => item.label === "Next up" && item.value === "Review Feedback"));
   assert.match(draft.tasksText, /Review instructor feedback/);
+});
+
+test("createCourseDraftFromMaterial recovers a complete graded assignment from noisy Canvas OCR", () => {
+  const draft = createCourseDraftFromMaterial(`
+    @ Chrome XX HE BF HLER PE PARR FET BHO HE 4+ © e3xvm = 6) Q 8 7A2BRAER TH925
+    v Read and respond Contactle: X + [8]/8] Gemini
+    & (¢] 25 example.instructure.com/courses/999/assignments/111?return_to=https%3A%2F%2Fexample.instructure.com%2Fcalendar%23.. LY % foe) Zr EfTEsEIT ER
+    A Read and respond Future Care 20/20 Points
+    School Home Due: Tue Jul 14, 2026 3:00pm
+    ® Announcements Offline Score:
+    Attempt 1 v O Review Feedback Ine score: EN Add Comment
+    Account | Assignments 20/20
+    _ Anonymous Grading: no
+    fi) Discussions
+    Didilireri Grades [0 Unlimited Attempts Allowed
+    peop
+    Courses eople v Details
+    Pages No submission
+    Callzmety Files Read Story Chapter Future care
+    Eh Syllabus
+    obox Modules
+    https:/archive.org/details/future-care 202401
+    © Attendance all class group
+    History
+    = one person is director, a prop manager, a producer and actors
+    Studio Mini Play
+    @ Create a short play that imagines life in 2041. Include at least:
+    Help e One Al healthcare technology
+    ¢ One ethical dilemma
+    ¢ One emotional conflict
+    e A possible solution
+    Previous Next
+    2 © 2]
+  `, "canvas-graded-assignment.png");
+
+  assert.equal(draft.sourceType, "Canvas assignment page");
+  assert.equal(draft.assignment, "Read and respond Future Care");
+  assert.equal(draft.dueDate, "Tue Jul 14, 2026, 3:00 PM");
+  assert.equal(draft.points, "20 Points Possible");
+  assert.deepEqual(draft.status, {
+    grading: "Graded",
+    nextUp: "Review Feedback",
+    attempt: "Attempt 1",
+    score: "20/20",
+    attemptsAllowed: "Unlimited Attempts Allowed",
+    submission: "No submission",
+    anonymousGrading: "No"
+  });
+  assert.equal(
+    draft.linksText,
+    "https://archive.org/details/future-care_202401"
+  );
+  assert.ok(draft.assignmentDetails.requirements.some((item) =>
+    /Read Story Chapter Future care/i.test(item)
+  ));
+  assert.ok(draft.assignmentDetails.requirements.some((item) =>
+    /one person is director, a prop manager, a producer and actors/i.test(item)
+  ));
+  assert.ok(draft.assignmentDetails.requirements.some((item) =>
+    /One AI healthcare technology/i.test(item)
+  ));
+  assert.ok(draft.assignmentDetails.requirements.some((item) =>
+    /One ethical dilemma/i.test(item)
+  ));
+  assert.ok(draft.assignmentDetails.requirements.some((item) =>
+    /One emotional conflict/i.test(item)
+  ));
+  assert.ok(draft.assignmentDetails.requirements.some((item) =>
+    /A possible solution/i.test(item)
+  ));
+  assert.ok(draft.assignmentDetails.steps.includes(
+    'Read "Future care" and take notes for the group.'
+  ));
+  assert.ok(draft.assignmentDetails.steps.some((item) =>
+    /Assign.*director.*prop manager.*producer.*actors/i.test(item)
+  ));
+  assert.ok(draft.assignmentDetails.steps.some((item) =>
+    /Draft.*mini play.*2041/i.test(item)
+  ));
+  assert.doesNotMatch(
+    draft.assignmentDetails.steps.join("\n"),
+    /AI for background research/i
+  );
+  assert.doesNotMatch(draft.tasksText, /20\/20 Points/i);
 });
 
 test("extraction treats only meaningful scores as Graded", () => {
@@ -1218,13 +1302,13 @@ test("createCourseDraftFromMaterial treats a synthetic CS450 syllabus as course-
     CS450 - Technology and Society - Summer 2026 - CS450(A)
 
     Semester and Year: Summer 2026
-    Professor: Shalini Gopalkrishnan
+    Professor: Alex Morgan
     Credits: 3.0
     Section Number: A
     Modality: On-campus
     Meeting Location: M/W: 9:00 AM - 11:45 AM, Classroom 201
     Office Hours: Tue: 12 to 1 By appointment in person / zoom
-    Email: shalini.gopalkrishnan@sfbu.edu
+    Email: alex.morgan@example.edu
 
     COURSE DESCRIPTION
     This course explores the intersection of Artificial Intelligence (AI) and emerging technologies, including Web 3.0, the Metaverse, Blockchain, Cybersecurity, Quantum, Biotechnology, IoT, Edge Computing, Space technologies and ESG frameworks.
@@ -1276,13 +1360,13 @@ test("createCourseDraftFromMaterial treats a synthetic CS450 syllabus as course-
   assert.equal(draft.name, "Technology and Society");
   assert.equal(draft.coursePlan.syllabusUploaded, true);
   assert.equal(draft.coursePlan.term, "Summer 2026");
-  assert.equal(draft.coursePlan.professor, "Shalini Gopalkrishnan");
+  assert.equal(draft.coursePlan.professor, "Alex Morgan");
   assert.equal(draft.coursePlan.credits, "3.0");
   assert.equal(draft.coursePlan.section, "A");
   assert.equal(draft.coursePlan.modality, "On-campus");
   assert.equal(draft.coursePlan.meetingLocation, "M/W: 9:00 AM - 11:45 AM, Classroom 201");
   assert.equal(draft.coursePlan.officeHours, "Tue: 12 to 1 By appointment in person / zoom");
-  assert.equal(draft.coursePlan.email, "shalini.gopalkrishnan@sfbu.edu");
+  assert.equal(draft.coursePlan.email, "alex.morgan@example.edu");
   assert.ok(draft.coursePlan.grading.some((item) => item.label === "Final Exam" && item.weight === "30%"));
   assert.ok(draft.coursePlan.weeklyGuide.some((week) => week.week === "Week 3" && week.topic === "Web 3.0" && week.assignments.includes("Research Paper")));
   assert.ok(draft.coursePlan.policies.some((policy) => policy.label === "AI policy" && /QJE framework/i.test(policy.text)));
@@ -1333,13 +1417,13 @@ test("separate course syllabi stay in separate course directories", () => {
   const cs450Draft = createCourseDraftFromMaterial(`
     CS450 - Technology and Society - Summer 2026 - CS450(A)
     Semester and Year: Summer 2026
-    Professor: Shalini Gopalkrishnan
+    Professor: Alex Morgan
     Credits: 3.0
     Section Number: A
     Modality: On-campus
     Meeting Location: M/W: 9:00 AM - 11:45 AM, Classroom 201
     Office Hours: Tue: 12 to 1 By appointment in person / zoom
-    Email: shalini.gopalkrishnan@sfbu.edu
+    Email: alex.morgan@example.edu
     COURSE GRADING POLICY
     Certifications 20%
     Final Exam 30%
@@ -1371,7 +1455,7 @@ test("separate course syllabi stay in separate course directories", () => {
   const bus501 = second.courses.find((course) => course.code === "BUS501");
 
   assert.equal(second.courses.length, 2);
-  assert.equal(cs450.coursePlan.professor, "Shalini Gopalkrishnan");
+  assert.equal(cs450.coursePlan.professor, "Alex Morgan");
   assert.equal(bus501.coursePlan.professor, "Mina Patel");
   assert.ok(cs450.coursePlan.weeklyGuide.some((week) => week.assignments.includes("Research Paper")));
   assert.ok(!bus501.coursePlan.weeklyGuide.some((week) => week.assignments.includes("Research Paper")));
@@ -1410,7 +1494,7 @@ test("bindDraftToCourse forces directory uploads into the selected course", () =
   const syllabusDraft = createCourseDraftFromMaterial(`
     CS450 - Technology and Society - Summer 2026 - CS450(A)
     Semester and Year: Summer 2026
-    Professor: Shalini Gopalkrishnan
+    Professor: Alex Morgan
     COURSE GRADING POLICY
     Final Exam 30%
   `);
@@ -1453,7 +1537,7 @@ test("noisy Canvas screenshot OCR uses the selected course and the real assignme
   const syllabusDraft = createCourseDraftFromMaterial(`
     CS450 - Technology and Society - Summer 2026 - CS450(A)
     Semester and Year: Summer 2026
-    Professor: Shalini Gopalkrishnan
+    Professor: Alex Morgan
     COURSE GRADING POLICY
     Final Exam 30%
   `);
@@ -1462,7 +1546,7 @@ test("noisy Canvas screenshot OCR uses the selected course and the real assignme
     `
       v A Resources | Example University x Attend a seminar xX + [818 Gemini
       @ Chrome XX HE BF HLER PE PARR FET BHO HE © J 28% = 6 Q 8 7A19HREA T#11:00
-      & (¢] 25 sfbu.instructure.com/courses/1742/assignments/30213?module_item_id=87010 I 3% foe) Zr EfTEsEIT ER
+      & (¢] 25 example.instructure.com/courses/999/assignments/222?module_item_id=333 I 3% foe) Zr EfTEsEIT ER
       IN — SUMMER 2026 CS450 - A > Assignments > Attend a seminar [%) Immersive Reader
       Account Home Due: Tue Jul 28, 2026 11:59pm
       Attend a seminar 100 Points Possible
@@ -1504,7 +1588,7 @@ test("buildAssignmentCoach explains the selected assignment in Chinese with requ
   const syllabusDraft = createCourseDraftFromMaterial(`
     CS450 - Technology and Society - Summer 2026 - CS450(A)
     Semester and Year: Summer 2026
-    Professor: Shalini Gopalkrishnan
+    Professor: Alex Morgan
     COURSE GRADING POLICY
     SEMINAR 10%
     Final Exam 30%
@@ -1550,7 +1634,7 @@ test("buildCourseCoach summarizes syllabus priorities without needing a selected
   const syllabusDraft = createCourseDraftFromMaterial(`
     CS450 - Technology and Society - Summer 2026 - CS450(A)
     Semester and Year: Summer 2026
-    Professor: Shalini Gopalkrishnan
+    Professor: Alex Morgan
     COURSE GRADING POLICY
     Certifications 20%
     SEMINAR 10%
@@ -1585,7 +1669,7 @@ test("createCourseFromDraft saves user-corrected screenshot fields", () => {
   const draft = createCourseDraftFromMaterial(
     `
       Chrome file edit view history
-      sfbu.instructure.com courses assignments
+      example.instructure.com courses assignments
       Watch this vide0
       Due: Sat Jul 11, 2026 9:00am
       10 Points Possible

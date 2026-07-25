@@ -682,6 +682,33 @@ function renderAssignmentTasks(course, assignment) {
   }).join("") + "</ul>";
 }
 
+function renderAssignmentMetadata(assignment) {
+  const status = assignment.status && typeof assignment.status === "object"
+    ? assignment.status
+    : {};
+  const rows = [
+    ["Due", formatAbsoluteDeadline(assignment)],
+    ["Points", assignment.points],
+    ["Score", hasMeaningfulScore(status.score) ? status.score : ""],
+    ["Status", assignmentStatusLabel(assignment)],
+    ["Canvas next up", status.nextUp],
+    ["Attempt", status.attempt],
+    ["Submission", status.submission],
+    ["Anonymous grading", status.anonymousGrading],
+    ["Attempts allowed", status.attemptsAllowed],
+    ["Estimate", formatEstimate(assignment.estimateMinutes)],
+    [
+      "Next action",
+      assignment.nextAction || "Review the assignment requirements"
+    ]
+  ].filter(([, value]) => String(value || "").trim());
+
+  return "<dl>" + rows.map(([label, value]) =>
+    "<div><dt>" + escapeHtml(label) + "</dt><dd>" +
+      escapeHtml(value) + "</dd></div>"
+  ).join("") + "</dl>";
+}
+
 function renderSelectedAssignmentDetail(course, assignment) {
   const requirements = assignment.details?.requirements || [];
   const deliverables = assignment.details?.deliverables || [];
@@ -691,16 +718,7 @@ function renderSelectedAssignmentDetail(course, assignment) {
       '<p class="assignment-kicker">' +
         escapeHtml(course.code || course.name || "Course") + "</p>" +
       "<h2>" + escapeHtml(assignment.title || "Untitled assignment") + "</h2>" +
-      "<dl>" +
-        "<div><dt>Due</dt><dd>" +
-          escapeHtml(formatAbsoluteDeadline(assignment)) + "</dd></div>" +
-        "<div><dt>Estimate</dt><dd>" +
-          escapeHtml(formatEstimate(assignment.estimateMinutes)) + "</dd></div>" +
-        "<div><dt>Next action</dt><dd>" +
-          escapeHtml(
-            assignment.nextAction || "Review the assignment requirements"
-          ) + "</dd></div>" +
-      "</dl>" +
+      renderAssignmentMetadata(assignment) +
       '<section aria-labelledby="selectedLinksHeading">' +
         '<h3 id="selectedLinksHeading">Source links</h3>' +
         renderAssignmentDetailList(

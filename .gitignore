@@ -7,4 +7,5 @@ dist/
 .worktrees/
 .superpowers/
 docs/superpowers/
+.playwright-cli/
 npm-debug.log*

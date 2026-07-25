@@ -461,6 +461,14 @@
     }
 
     for (const line of lines) {
+      const match = normalizeText(line).match(
+        /^(.+?)\s+\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\s+points?\b/i
+      );
+      const title = cleanCanvasScoredTitle(match?.[1] || "");
+      if (title && !isWeakCanvasAssignmentTitle(title)) return title;
+    }
+
+    for (const line of lines) {
       const match = normalizeText(line).match(/^(.+?)\s+\d+(?:\.\d+)?\s+points?\s+possible\b/i);
       const title = cleanCanvasAssignmentTitle(match?.[1] || "");
       if (title && !isWeakCanvasAssignmentTitle(title)) return title;
@@ -477,14 +485,24 @@
       .trim();
   }
 
+  function cleanCanvasScoredTitle(value) {
+    return cleanCanvasAssignmentTitle(value).replace(
+      /^[A-Z]\s+(?=(?:read|write|watch|attend|submit|create|complete|review|respond|discuss|quiz|assignment|project|paper)\b)/i,
+      ""
+    );
+  }
+
   function isWeakCanvasAssignmentTitle(value) {
     const line = normalizeText(value);
     if (!line) return true;
     if (/^\d+$/.test(line)) return true;
-    if (/^(account|account home|home|dashboard|courses|calendar|inbox|history|help|assignments|previous|next|details|submit assignment|immersive reader)$/i.test(line)) {
+    if (/^(account|account home|home|[a-z]{2,12} home|dashboard|courses|calendar|inbox|history|help|assignments|previous|next|details|submit assignment|immersive reader)$/i.test(line)) {
       return true;
     }
-    if (/sfbu\.instructure\.com|courses\/\d+|module_item_id|chrome|safari|firefox/i.test(line)) return true;
+    if (
+      /instructure\.com|courses\/\d+|module_item_id|chrome|safari|firefox/i.test(line) ||
+      /^\d+\?(?:return_to|module_item_id)=/i.test(line)
+    ) return true;
     return false;
   }
 
@@ -592,20 +610,24 @@
   }
 
   function extractCanvasDetails(lines) {
-    const detailsStart = lines.findIndex((line) => /^details:?$/i.test(line));
+    const detailsStart = lines.findIndex((line) => /\bdetails?:?\s*$/i.test(line));
     if (detailsStart < 0) return extractCanvasDetailFallback(lines);
 
     const details = [];
     for (let index = detailsStart + 1; index < lines.length; index += 1) {
       const line = lines[index];
       if (/^choose a submission type$/i.test(line)) break;
-      if (isCanvasInterfaceLine(line)) continue;
+      if (/\bprevious\s+next\b/i.test(line)) break;
       const detail = cleanCanvasDetailLine(line);
-      if (!detail || isCanvasInterfaceLine(detail)) continue;
+      if (
+        !detail ||
+        isCanvasInterfaceLine(detail) ||
+        isAssignmentStatusLine(detail)
+      ) continue;
       details.push(detail);
     }
 
-    return uniqueTextList(details.length ? details : extractCanvasDetailFallback(lines)).slice(0, 6);
+    return uniqueTextList(details.length ? details : extractCanvasDetailFallback(lines)).slice(0, 12);
   }
 
   function extractCanvasDetailFallback(lines) {
@@ -619,7 +641,17 @@
   }
 
   function cleanCanvasDetailLine(line) {
-    const value = normalizeText(line);
+    let value = normalizeText(line);
+    const navigationPrefix = value.match(
+      /^.*\b(?:account|announcements|dashboard|courses|calendar|inbox|history|help|home|assignments|discussions|grades|people|pages|files|syllabus|modules|attendance|studio)\b\s*(.*)$/i
+    );
+    if (navigationPrefix) value = normalizeText(navigationPrefix[1]);
+    value = value
+      .replace(/^[^A-Za-z0-9]+/, "")
+      .replace(/^[A-Za-z]\s+(?=(?:One|A)\b)/, "")
+      .replace(/\bOne\s+Al\s+(?=healthcare\b)/i, "One AI ");
+    if (/^https?:\/{1,2}/i.test(value)) return repairImportedUrl(value);
+    if (/^(?:no submission|anonymous grading\b)/i.test(value)) return "";
     const maxPageMatch = value.match(/\b(max\s+one\s+page.+)$/i);
     if (maxPageMatch) return normalizeText(maxPageMatch[1]);
     return value;
@@ -647,7 +679,7 @@
     return (
       /^(account|dashboard|courses|calendar|inbox|history|help|home|announcements|assignments|discussions|grades|people|pages|files|syllabus|modules|attendance)$/i.test(value) ||
       /^(previous|next|add comment|submit assignment|immersive reader|attempt|choose a submission type|details)$/i.test(value) ||
-      /chrome|safari|firefox|gemini|sfbu\.instructure\.com|module_item_id|resources\s*\|\s*san francisco/i.test(value) ||
+      /chrome|safari|firefox|gemini|instructure\.com|module_item_id|resources\s*\|/i.test(value) ||
       />\s*assignments?\s*>/i.test(value) ||
       /^summer\s+\d{4}$/i.test(value) ||
       isCanvasSubmissionType(value)
@@ -995,13 +1027,45 @@
     if (/\b(pictures?|photos?|images?)\b/i.test(text)) {
       steps.push("Add pictures to support the reflection.");
     }
+    const readingMatch = text.match(
+      /\bread story chapter\s+(.+?)(?=\s+(?:https?:|all class group|one person is|mini play|create a short play)|$)/i
+    );
+    if (readingMatch) {
+      steps.push(`Read "${normalizeText(readingMatch[1])}" and take notes for the group.`);
+    }
+    if (
+      /\bone person is director\b/i.test(text) &&
+      /\bprop manager\b/i.test(text) &&
+      /\bproducer\b/i.test(text) &&
+      /\bactors?\b/i.test(text)
+    ) {
+      steps.push("Assign the director, prop manager, producer, and actors.");
+    }
+    if (/\bmini play\b|\bcreate a short play\b/i.test(text)) {
+      steps.push(
+        /\b2041\b/.test(text)
+          ? "Draft the mini play set in 2041."
+          : "Draft the required mini play."
+      );
+    }
+    if (
+      /\bAI healthcare technology\b/i.test(text) ||
+      /\bethical dilemma\b/i.test(text) ||
+      /\bemotional conflict\b/i.test(text) ||
+      /\bpossible solution\b/i.test(text)
+    ) {
+      steps.push("Check that the play includes the required technology, dilemma, conflict, and solution.");
+    }
     return steps;
   }
 
   function hasAiCollaborationRequirement(lines) {
     return lines.some((line) => {
       const value = normalizeText(line);
-      if (!/\bAI\b|artificial intelligence|AI-assisted|AI tools?/i.test(value)) return false;
+      if (
+        !/\b(?:use|using|used|collaborat\w*|leverage|prompt\w*)\b.{0,60}\b(?:AI|artificial intelligence)\b/i.test(value) &&
+        !/\bAI(?:-assisted)?\b.{0,60}\b(?:use|tool|assistant|research|analysis|insight|prediction|scenario|interaction)/i.test(value)
+      ) return false;
       if (/^\w+\s*\d{2,4}/i.test(value) && value.length < 80) return false;
       if (/>\s*assignments?\s*>/i.test(value)) return false;
       return true;
@@ -1108,31 +1172,55 @@
     const value = normalizeText(line);
     return (
       /\bpoints?\s+possible\b/i.test(value) ||
+      /\b\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\s+points?\b/i.test(value) ||
       /^attendance\b/i.test(value) ||
       /previous.*submit assignment.*next/i.test(value) ||
-      /account home|immersive reader|sfbu\.instructure\.com|resources\s*\|\s*san francisco|chrome|gemini/i.test(value)
+      /account home|immersive reader|instructure\.com|resources\s*\||chrome|gemini/i.test(value)
     );
   }
 
   function isAssignmentStatusLine(line) {
-    return /^(late|missing|submitted on|attempt(?:\s+\d+)?(?:\s+score)?|n\/a|ungraded|graded|unlimited attempts allowed|next up)\b/i.test(
+    return /^(late|missing|no submission|anonymous grading|submitted on|attempt(?:\s+\d+)?(?:\s+score)?|n\/a|ungraded|graded|unlimited attempts allowed|next up)\b/i.test(
       normalizeText(line)
     );
   }
 
   function inferMaterialMetadata(lines) {
     const pointsLine = normalizeText(lines.find((line) => /\b\d+(?:\.\d+)?\s+points?\s+possible\b/i.test(line)) || "");
-    const points = normalizeText(pointsLine.match(/\b\d+(?:\.\d+)?\s+points?\s+possible\b/i)?.[0] || "");
+    const scoredPointsMatch = lines
+      .map((line) => normalizeText(line).match(/\b\d+(?:\.\d+)?\s*\/\s*(\d+(?:\.\d+)?)\s+points?\b/i))
+      .find(Boolean);
+    const points = normalizeText(
+      pointsLine.match(/\b\d+(?:\.\d+)?\s+points?\s+possible\b/i)?.[0] ||
+      (scoredPointsMatch ? `${scoredPointsMatch[1]} Points Possible` : "")
+    );
     const submissionTypes = extractCanvasSubmissionTypes(lines);
-    const links = lines
-      .flatMap((line) => line.match(/https?:\/\/\S+/gi) || [])
-      .map((link) => link.replace(/[),.]+$/g, ""));
+    const links = extractImportedLinks(lines);
 
     return {
       points,
       links: [...new Set(links)],
       submissionTypes
     };
+  }
+
+  function extractImportedLinks(lines) {
+    return lines
+      .flatMap((line) =>
+        normalizeText(line).match(/https?:\/{1,2}\S+(?:\s+\d{4,})?/gi) || []
+      )
+      .map(repairImportedUrl)
+      .filter(Boolean);
+  }
+
+  function repairImportedUrl(value) {
+    let url = normalizeText(value)
+      .replace(/^(https?):\/(?!\/)/i, "$1://")
+      .replace(/[),.]+$/g, "");
+    if (/archive\.org\/details\//i.test(url)) {
+      url = url.replace(/([A-Za-z0-9-])\s+(\d{4,})$/, "$1_$2");
+    }
+    return url;
   }
 
   function inferAssignmentStatus(lines, dateContext = {}) {
@@ -1161,6 +1249,8 @@
     }
     if (nextUpLine) {
       status.nextUp = normalizeText(nextUpLine.replace(/^next up\s*:?\s*/i, ""));
+    } else if (lines.some((line) => /\breview feedback\b/i.test(line))) {
+      status.nextUp = "Review Feedback";
     }
     if (attemptLine) {
       status.attempt = normalizeText(attemptLine.match(/^attempt\s+\d+/i)?.[0] || attemptLine);
@@ -1168,12 +1258,40 @@
     if (scoreIndex >= 0) {
       const inlineScore = normalizeText(lines[scoreIndex].replace(/^attempt\s+\d+\s+score\s*:?\s*/i, ""));
       status.score = inlineScore || normalizeText(lines[scoreIndex + 1] || "");
+    } else {
+      const score = extractCanvasScore(lines);
+      if (score) status.score = score;
     }
     if (attemptsAllowedLine) {
       status.attemptsAllowed = normalizeText(attemptsAllowedLine.match(/\b(?:unlimited|\d+)\s+attempts?\s+allowed\b/i)?.[0] || attemptsAllowedLine);
     }
+    if (!status.grading && hasMeaningfulScore(status.score)) {
+      status.grading = "Graded";
+    }
+    if (lines.some((line) => /\bno submission\b/i.test(line))) {
+      status.submission = "No submission";
+    }
+    const anonymousGradingLine = lines.find((line) => /\banonymous grading\s*:\s*(?:yes|no)\b/i.test(line));
+    if (anonymousGradingLine) {
+      const value = anonymousGradingLine.match(/\banonymous grading\s*:\s*(yes|no)\b/i)?.[1] || "";
+      status.anonymousGrading = capitalizeStatus(value);
+    }
 
     return status;
+  }
+
+  function extractCanvasScore(lines) {
+    const patterns = [
+      /\b(?:offline score|assignments?)\b.*?\b(\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?)\b/i,
+      /\b(\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?)\s+points?\b/i
+    ];
+    for (const pattern of patterns) {
+      for (const line of lines) {
+        const match = normalizeText(line).match(pattern);
+        if (match) return match[1].replace(/\s+/g, "");
+      }
+    }
+    return "";
   }
 
   function capitalizeStatus(value) {
