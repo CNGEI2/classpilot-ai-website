@@ -8,8 +8,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -25,12 +23,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Run logic tests
-        run: npm test
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify application
+        run: npm run verify
 
   deploy:
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -39,10 +43,10 @@ jobs:
         uses: actions/checkout@v4
       - name: Prepare static site
         run: |
+          rm -rf site-dist
           mkdir -p site-dist
-          cp index.html app.js logic.js styles.css site-dist/
+          cp index.html app.js logic.js planner.js file-readers.js styles.css .nojekyll site-dist/
           cp -R vendor site-dist/vendor
-          touch site-dist/.nojekyll
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload Pages artifact

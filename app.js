@@ -1,105 +1,125 @@
+"use strict";
+
 const {
-  addTaskToCourse,
-  applyCourseContextToDraft,
+  buildCalendarItems,
+  buildTodayQueue,
+  createIcsCalendar,
+  createEmptyWorkspace,
+  createWorkspaceSnapshot,
+  enrichWorkspacePlanningFields,
+  migrateLegacyCourses,
+  parseDueAt,
+  parseWorkspaceBackup,
+  removeAssignment,
+  removeWorkspaceCourse,
+  restoreWorkspaceSnapshot,
+  serializeWorkspaceBackup,
+  normalizeWorkspace,
+  updateCourse,
+  updateAssignment
+} = window.ClassPilotPlanner;
+const {
   bindDraftToCourse,
   buildAssignmentCoach,
   buildCourseCoach,
-  calculateProgress,
   createCourseDraftFromMaterial,
-  groupAssignmentsByCategory,
-  getActionAvailability,
-  getCourseImportFileKind,
-  normalizeCourseAssignments,
-  removeCourseById,
-  upsertCourseFromDraft,
+  hasMeaningfulScore,
+  parseStructuredEnglishDate,
+  upsertCourseFromDraft
 } = window.ClassPilotLogic;
+const { readImportFile } = window.ClassPilotFileReaders;
 
-const colorMap = {
-  teal: { color: "#1f7a78", soft: "#d7eeea" },
-  coral: { color: "#df5b49", soft: "#f9ddd7" },
-  gold: { color: "#efbd45", soft: "#f8edc8" }
-};
-
-const storageKey = "classpilot-user-courses-v6";
-
-let courses = loadSavedCourses();
-let activeCourseId = courses[0]?.id || "";
-let explanationLanguage = "en";
-let importIsBusy = false;
-let pendingImportDraft = null;
-let screenshotPreviewUrl = "";
+const WORKSPACE_KEY = "classpilot-workspace-v7";
+const LEGACY_KEY = "classpilot-user-courses-v6";
+const VALID_VIEWS = ["today", "courses", "calendar", "data"];
+const NAV_ITEMS = [
+  ["today", "circle-dot", "Today"],
+  ["courses", "book-open", "Courses"],
+  ["calendar", "calendar-days", "Calendar"],
+  ["data", "database", "Data"]
+];
+const COURSE_COLORS = ["#376f92", "#16766f", "#c95545", "#705b8f", "#c79419"];
 
 const elements = {
-  addTaskButton: document.querySelector("#addTaskButton"),
+  appNav: document.querySelector("#appNav"),
   appStatus: document.querySelector("#appStatus"),
-  breakdownResult: document.querySelector("#breakdownResult"),
-  buildCourseButton: document.querySelector("#buildCourseButton"),
-  clearCourses: document.querySelector("#clearCourses"),
-  coachOutput: document.querySelector("#coachOutput"),
-  completedCount: document.querySelector("#completedCount"),
-  confidencePill: document.querySelector("#confidencePill"),
-  courseFile: document.querySelector("#courseFile"),
-  courseImportForm: document.querySelector("#courseImportForm"),
+  assignmentDialog: document.querySelector("#assignmentDialog"),
+  assignmentForm: document.querySelector("#assignmentForm"),
+  backupPreview: document.querySelector("#backupPreview"),
+  calendarView: document.querySelector("#calendarView"),
+  calendarAgenda: document.querySelector("#calendarAgenda"),
+  calendarCourseFilter: document.querySelector("#calendarCourseFilter"),
+  calendarGrid: document.querySelector("#calendarGrid"),
+  calendarMonthLabel: document.querySelector("#calendarMonthLabel"),
+  calendarTypeFilter: document.querySelector("#calendarTypeFilter"),
+  clearWorkspace: document.querySelector("#clearWorkspace"),
+  confirmationDialog: document.querySelector("#confirmationDialog"),
+  courseImportActions: document.querySelector("#courseImportActions"),
   courseList: document.querySelector("#courseList"),
-  courseMaterial: document.querySelector("#courseMaterial"),
-  courseNotes: document.querySelector("#courseNotes"),
-  courseSubtitle: document.querySelector("#courseSubtitle"),
-  deleteCourse: document.querySelector("#deleteCourse"),
-  courseTitle: document.querySelector("#courseTitle"),
-  miniMap: document.querySelector("#miniMap"),
-  progressOrb: document.querySelector("#progressOrb"),
-  railNote: document.querySelector("#railNote"),
-  discardReviewCourse: document.querySelector("#discardReviewCourse"),
-  importReviewCard: document.querySelector("#importReviewCard"),
-  reviewAssignment: document.querySelector("#reviewAssignment"),
-  reviewCourseCode: document.querySelector("#reviewCourseCode"),
-  reviewCourseName: document.querySelector("#reviewCourseName"),
-  reviewDueDate: document.querySelector("#reviewDueDate"),
-  reviewLinks: document.querySelector("#reviewLinks"),
-  reviewPoints: document.querySelector("#reviewPoints"),
-  reviewRawText: document.querySelector("#reviewRawText"),
-  reviewSmartReadout: document.querySelector("#reviewSmartReadout"),
-  reviewTasks: document.querySelector("#reviewTasks"),
-  saveReviewCourse: document.querySelector("#saveReviewCourse"),
-  sourceCheckText: document.querySelector("#sourceCheckText"),
-  screenshotOcrProgress: document.querySelector("#screenshotOcrProgress"),
-  screenshotPreview: document.querySelector("#screenshotPreview"),
-  screenshotPreviewCard: document.querySelector("#screenshotPreviewCard"),
-  screenshotPreviewMeta: document.querySelector("#screenshotPreviewMeta"),
-  studyPlan: document.querySelector("#studyPlan"),
-  syllabusResult: document.querySelector("#syllabusResult"),
+  coursePlanDialog: document.querySelector("#coursePlanDialog"),
+  coursePlanForm: document.querySelector("#coursePlanForm"),
+  courseTabs: document.querySelector("#courseTabs"),
+  courseWorkspace: document.querySelector("#courseWorkspace"),
+  coursesView: document.querySelector("#coursesView"),
+  dataView: document.querySelector("#dataView"),
+  dataSummary: document.querySelector("#dataSummary"),
+  exportBackup: document.querySelector("#exportBackup"),
+  exportCalendar: document.querySelector("#exportCalendar"),
+  globalImportButton: document.querySelector("#globalImportButton"),
+  headerImportButton: document.querySelector("#headerImportButton"),
+  importDropZone: document.querySelector("#importDropZone"),
+  importDialog: document.querySelector("#importDialog"),
+  importDialogTitle: document.querySelector("#importDialogTitle"),
+  importFile: document.querySelector("#importFile"),
+  importForm: document.querySelector("#importForm"),
+  importBackup: document.querySelector("#importBackup"),
+  importProgress: document.querySelector("#importProgress"),
+  importProgressDetail: document.querySelector("#importProgressDetail"),
+  importReview: document.querySelector("#importReview"),
+  importText: document.querySelector("#importText"),
+  mainWorkspace: document.querySelector("#mainWorkspace"),
+  mobileNav: document.querySelector(".mobile-nav"),
+  reviewEvidence: document.querySelector("#reviewEvidence"),
+  saveImportReview: document.querySelector("#saveImportReview"),
+  restoreBackup: document.querySelector("#restoreBackup"),
+  analyzeImport: document.querySelector("#analyzeImport"),
+  cancelImport: document.querySelector("#cancelImport"),
+  todayView: document.querySelector("#todayView"),
+  taskDialog: document.querySelector("#taskDialog"),
   taskForm: document.querySelector("#taskForm"),
-  taskList: document.querySelector("#taskList"),
-  taskTitle: document.querySelector("#taskTitle"),
-  upcomingCount: document.querySelector("#upcomingCount"),
-  weekRail: document.querySelector("#weekRail")
+  undoToast: document.querySelector("#undoToast"),
+  undatedItems: document.querySelector("#undatedItems"),
+  lastBackup: document.querySelector("#lastBackup"),
+  viewEyebrow: document.querySelector("#viewEyebrow"),
+  viewTitle: document.querySelector("#viewTitle")
 };
 
-function loadSavedCourses() {
-  try {
-    const saved = window.localStorage.getItem(storageKey);
-    return saved ? JSON.parse(saved).map(normalizeCourseAssignments) : [];
-  } catch (error) {
-    return [];
-  }
-}
+const state = {
+  activeCourseTab: "assignments",
+  activeView: "today",
+  calendarCursor: new Date(),
+  calendarTypeFilter: "all",
+  assignmentFilters: new Map(),
+  selectedCalendarDate: "",
+  selectedAssignmentId: "",
+  storageAvailable: true,
+  storageRecoveryRequired: false
+};
 
-function saveCourses() {
-  window.localStorage.setItem(storageKey, JSON.stringify(courses));
-}
-
-function getActiveCourse() {
-  return courses.find((course) => course.id === activeCourseId) || courses[0] || null;
-}
-
-function setCourseTheme(course) {
-  const theme = colorMap[course?.accent] || colorMap.teal;
-  document.documentElement.style.setProperty("--course-color", theme.color);
-  document.documentElement.style.setProperty("--course-soft", theme.soft);
-}
+let workspace;
+let importController;
+let activeOcrOperation;
+let pendingImportDraft;
+let importCourseId = "";
+let undoState;
+let undoTimer;
+let pendingBackup;
+let backupPreviewOperation = 0;
+let clearWorkspaceConfirmationPending = false;
+const dialogOpeners = new WeakMap();
 
 function escapeHtml(value) {
-  return String(value)
+  return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -107,1236 +127,2670 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function makeUniqueCourseId(course) {
-  let id = course.id;
-  let suffix = 2;
-  while (courses.some((item) => item.id === id)) {
-    id = `${course.id}-${suffix}`;
-    suffix += 1;
-  }
-  return { ...course, id };
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
 }
 
-function renderCourses() {
-  if (courses.length === 0) {
-    elements.courseList.innerHTML = `<div class="empty-state">Paste or upload course material to build your dashboard.</div>`;
-    return;
-  }
-
-  elements.courseList.innerHTML = courses
-    .map((course) => {
-      const normalizedCourse = normalizeCourseAssignments(course);
-      const progress = calculateProgress(normalizedCourse.tasks);
-      const theme = colorMap[course.accent] || colorMap.teal;
-      const assignmentCount = normalizedCourse.assignments.length;
-      const syllabusLabel = normalizedCourse.coursePlan?.syllabusUploaded ? "syllabus saved" : "needs syllabus";
-      return `
-        <div class="course-entry ${course.id === activeCourseId ? "active" : ""}" style="--course-color: ${theme.color}">
-          <button class="course-button ${course.id === activeCourseId ? "active" : ""}" type="button" data-course-id="${course.id}">
-            <span class="course-code">${escapeHtml(course.code)}</span>
-            <span>${escapeHtml(course.name)}</span>
-            <span class="course-meta">${escapeHtml(syllabusLabel)} · ${assignmentCount} assignment${assignmentCount === 1 ? "" : "s"} · ${progress.percent}% complete</span>
-          </button>
-          <button class="course-delete" type="button" data-delete-course-id="${course.id}" aria-label="Delete ${escapeHtml(course.code)}" title="Delete ${escapeHtml(course.code)}">×</button>
-        </div>
-      `;
-    })
-    .join("");
+function splitReviewLines(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
-function renderTermPulse() {
-  const allTasks = courses.flatMap((course) => course.tasks);
-  const progress = calculateProgress(allTasks);
-  const upcoming = courses.reduce((sum, course) => sum + course.deadlines.length, 0);
-  elements.upcomingCount.textContent = String(upcoming);
-  elements.completedCount.textContent = `${progress.completed}/${progress.total}`;
-  elements.miniMap.innerHTML = courses
-    .flatMap((course) =>
-      course.deadlines.map((deadline, index) => {
-        const className = index === 0 ? "is-hot" : index === 1 ? "is-mid" : "is-calm";
-        return `<span class="mini-cell ${className}" title="${escapeHtml(course.code)}: ${escapeHtml(deadline.label)}"></span>`;
-      })
-    )
-    .join("");
+function splitEditableLines(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
-function renderCourseHeader(course) {
-  if (!course) {
-    elements.courseTitle.textContent = "Create your first course";
-    elements.courseSubtitle.textContent = "Paste course material, a schedule, or an assignment page on the left. ClassPilot will extract deadlines, tasks, and topics.";
-    elements.courseNotes.textContent = "Your imported course details will appear here.";
-    return;
-  }
-
-  const normalizedCourse = normalizeCourseAssignments(course);
-  const assignmentCount = normalizedCourse.assignments.length;
-  const syllabusStatus = normalizedCourse.coursePlan?.syllabusUploaded ? "syllabus saved" : "upload this course's syllabus";
-  elements.courseTitle.textContent = `${course.code}: ${course.name}`;
-  elements.courseSubtitle.textContent = `${capitalize(syllabusStatus)}. ${assignmentCount} imported assignment${assignmentCount === 1 ? "" : "s"} grouped only in this course. Next deadline: ${course.nextDue} on ${course.dueDate}.`;
-  elements.courseNotes.textContent = course.notes;
+function editorControl(form, name) {
+  return form.elements?.namedItem?.(name) || form.elements?.[name] || null;
 }
 
-function renderWeekRail(course) {
-  if (!course) {
-    elements.railNote.textContent = "0 checkpoints";
-    elements.weekRail.innerHTML = `<li class="rail-item empty-rail"><span class="rail-title">No deadlines yet</span><span class="rail-type">add course</span></li>`;
-    return;
-  }
-
-  elements.railNote.textContent = `${course.deadlines.length} checkpoints`;
-  elements.weekRail.innerHTML = course.deadlines
-    .map(
-      (deadline) => `
-        <li class="rail-item">
-          <span class="rail-date">${escapeHtml(deadline.date)}</span>
-          <span class="rail-title">${escapeHtml(deadline.label)}</span>
-          <span class="rail-type">${escapeHtml(deadline.type)}</span>
-        </li>
-      `
-    )
-    .join("");
+function editorValue(form, name) {
+  return editorControl(form, name)?.value || "";
 }
 
-function renderTasks(course) {
-  if (!course) {
-    elements.progressOrb.textContent = "0%";
-    elements.progressOrb.setAttribute("aria-label", "No tasks yet");
-    elements.taskList.innerHTML = `<div class="empty-state light">Tasks extracted from your course material will appear here.</div>`;
-    return;
-  }
-
-  const normalizedCourse = normalizeCourseAssignments(course);
-  const groups = groupAssignmentsByCategory(normalizedCourse.assignments);
-  const progress = calculateProgress(normalizedCourse.tasks);
-  elements.progressOrb.textContent = `${progress.percent}%`;
-  elements.progressOrb.setAttribute(
-    "aria-label",
-    `${progress.completed} of ${progress.total} tasks completed`
-  );
-
-  if (groups.length === 0) {
-    elements.taskList.innerHTML = `<div class="empty-state light">This course has syllabus-level information saved. Upload an assignment page once to create assignment tasks under this course.</div>`;
-    return;
-  }
-
-  elements.taskList.innerHTML = groups
-    .map(
-      (group) => `
-        <section class="assignment-group">
-          <h4>${escapeHtml(group.label)}</h4>
-          ${group.assignments
-            .map(
-              (assignment) => `
-                <article class="assignment-card">
-                  <header>
-                    <span class="assignment-kicker">${escapeHtml(assignment.sourceType || "Imported")}</span>
-                    <h5>${escapeHtml(assignment.title)}</h5>
-                    <p>${escapeHtml(assignment.dueDate || "No date")}${assignment.points ? ` · ${escapeHtml(assignment.points)}` : ""}${assignment.status?.submittedAt ? ` · Submitted ${escapeHtml(assignment.status.submittedAt)}` : ""}</p>
-                  </header>
-                  ${renderAssignmentInlineSummary(assignment)}
-                  <div class="assignment-task-list">
-                    ${(assignment.tasks || [])
-                      .map(
-                        (task) => `
-                          <label class="task-row ${task.done ? "is-done" : ""}">
-                            <input type="checkbox" data-task-id="${task.id}" ${task.done ? "checked" : ""}>
-                            <span>${escapeHtml(task.title)}</span>
-                          </label>
-                        `
-                      )
-                      .join("")}
-                  </div>
-                </article>
-              `
-            )
-            .join("")}
-        </section>
-      `
-    )
-    .join("");
+function findAssignment(courseId, assignmentId) {
+  return workspace.courses.find((course) => course.id === courseId)
+    ?.assignments?.find((assignment) => assignment.id === assignmentId) || null;
 }
 
-function renderAssignmentInlineSummary(assignment) {
-  const details = assignment.details || {};
-  const requirements = details.requirements?.length ? details.requirements.slice(0, 3) : buildFallbackRequirements(assignment).slice(0, 3);
-  const steps = details.steps?.length ? details.steps.slice(0, 3) : buildFallbackSteps(assignment).slice(0, 3);
-
-  return `
-    <div class="assignment-intel">
-      <div>
-        <strong>Must include</strong>
-        <span>${escapeHtml(requirements.join(" · "))}</span>
-      </div>
-      <div>
-        <strong>Plan</strong>
-        <span>${escapeHtml(steps.join(" · "))}</span>
-      </div>
-    </div>
-  `;
+function commitWorkspace(nextWorkspace, options = {}) {
+  const previousWorkspace = workspace;
+  workspace = nextWorkspace;
+  if (!saveWorkspace({
+    allowStorageRecovery: options.allowStorageRecovery === true
+  })) {
+    workspace = previousWorkspace;
+    return false;
+  }
+  if (options.invalidateUndo !== false) invalidateUndo();
+  if (options.render !== false) renderAll();
+  return true;
 }
 
-function renderSourceCheck(course) {
-  if (!course) {
-    elements.confidencePill.textContent = "Waiting";
-    elements.sourceCheckText.textContent = "Import a course first, then ClassPilot can compare tasks, deadlines, and rubric notes.";
-    document.querySelector(".source-meter span").style.setProperty("--value", "0%");
-    return;
-  }
-
-  const openTasks = course.tasks.filter((task) => !task.done).length;
-  const priorityTopic = course.weakTopics[0] || "rubric";
-  const confidence = Number(course.confidence) || (openTasks <= 1 ? 82 : 68);
-  const warnings = Array.isArray(course.warnings) ? course.warnings : [];
-  const actionPlan = Array.isArray(course.actionPlan) ? course.actionPlan : [];
-  document.querySelector(".source-meter span").style.setProperty("--value", `${Math.max(0, Math.min(99, confidence))}%`);
-  elements.confidencePill.textContent = confidence >= 86 ? `High ${confidence}%` : confidence >= 65 ? `Review ${confidence}%` : `Fix ${confidence}%`;
-  elements.sourceCheckText.textContent =
-    warnings.length > 0
-      ? `Needs review: ${warnings.join(" ")} Current risk: ${priorityTopic}.`
-      : `Source type: ${course.sourceType || "Course material"}. ${actionPlan[0] || "ClassPilot checked the visible task, deadline, and source fields."}`;
-}
-
-function getCoachLabels() {
-  if (explanationLanguage === "zh") {
-    return {
-      assignmentFocus: "当前作业",
-      courseFocus: "课程重点",
-      mustDo: "必须包含",
-      nextSteps: "下一步",
-      scoreStrategy: "得分策略",
-      writingHelp: "写作开头",
-      riskFlags: "风险提醒",
-      priorities: "评分权重",
-      policyNotes: "课程规则",
-      studyFocus: "周计划重点",
-      noCourseTitle: "先上传一门课",
-      noCourseBody: "上传 syllabus 或作业截图后，ClassPilot 会自动生成作业和课程 coach。",
-      noAssignmentTitle: "还没有作业",
-      noAssignmentBody: "上传这门课的 Canvas 作业截图或复制文本，coach 会自动拆分要求。"
-    };
-  }
-  return {
-    assignmentFocus: "Current Assignment",
-    courseFocus: "Course Focus",
-    mustDo: "Must include",
-    nextSteps: "Next steps",
-    scoreStrategy: "Score strategy",
-    writingHelp: "Writing starts",
-    riskFlags: "Risk checks",
-    priorities: "Grade weights",
-    policyNotes: "Course rules",
-    studyFocus: "Weekly focus",
-    noCourseTitle: "Upload a course first",
-    noCourseBody: "After a syllabus or assignment screenshot is uploaded, ClassPilot builds the assignment and course coach automatically.",
-    noAssignmentTitle: "No assignment yet",
-    noAssignmentBody: "Upload this course's Canvas assignment screenshot or copied text to generate requirements and steps."
+function persistWorkspacePreferences(patch) {
+  const previousWorkspace = workspace;
+  const nextWorkspace = normalizeWorkspace(workspace);
+  nextWorkspace.preferences = {
+    ...nextWorkspace.preferences,
+    ...clone(patch)
   };
-}
-
-function chooseCoachAssignment(course) {
-  const assignments = normalizeCourseAssignments(course).assignments || [];
-  return (
-    assignments.find((assignment) => assignment.category === "To submit") ||
-    assignments.find((assignment) => assignment.category === "Late") ||
-    assignments.find((assignment) => assignment.category === "Needs review") ||
-    assignments.find((assignment) => assignment.category === "Feedback") ||
-    assignments[0] ||
-    null
-  );
-}
-
-function renderCoach(course = getActiveCourse()) {
-  const labels = getCoachLabels();
-  if (!course) {
-    elements.coachOutput.innerHTML = `
-      <section class="coach-empty">
-        <strong>${escapeHtml(labels.noCourseTitle)}</strong>
-        <span>${escapeHtml(labels.noCourseBody)}</span>
-      </section>
-    `;
-    return;
+  workspace = nextWorkspace;
+  if (!saveWorkspace()) {
+    workspace = previousWorkspace;
+    return false;
   }
-
-  const normalizedCourse = normalizeCourseAssignments(course);
-  const focusAssignment = chooseCoachAssignment(normalizedCourse);
-  const courseCoach = buildCourseCoach(normalizedCourse, explanationLanguage);
-  const assignmentCoach = focusAssignment ? buildAssignmentCoach(normalizedCourse, focusAssignment, explanationLanguage) : null;
-
-  elements.coachOutput.innerHTML = `
-    ${
-      assignmentCoach
-        ? renderAssignmentCoach(assignmentCoach, labels)
-        : `<section class="coach-empty"><strong>${escapeHtml(labels.noAssignmentTitle)}</strong><span>${escapeHtml(labels.noAssignmentBody)}</span></section>`
-    }
-    ${renderCourseCoach(courseCoach, labels)}
-  `;
-}
-
-function renderAssignmentCoach(coach, labels) {
-  return `
-    <section class="coach-section coach-section-primary">
-      <header>
-        <span>${escapeHtml(labels.assignmentFocus)}</span>
-        <h4>${escapeHtml(coach.title)}</h4>
-        <p>${escapeHtml(coach.summary)}</p>
-      </header>
-      <div class="coach-grid">
-        ${renderCoachList(labels.mustDo, coach.mustDo)}
-        ${renderCoachList(labels.nextSteps, coach.nextSteps, "ol")}
-        ${renderCoachList(labels.scoreStrategy, coach.scoreStrategy)}
-        ${renderCoachList(labels.writingHelp, coach.writingHelp)}
-        ${renderCoachList(labels.riskFlags, coach.riskFlags)}
-      </div>
-    </section>
-  `;
-}
-
-function renderCourseCoach(coach, labels) {
-  return `
-    <section class="coach-section">
-      <header>
-        <span>${escapeHtml(labels.courseFocus)}</span>
-        <h4>${escapeHtml(coach.title)}</h4>
-        <p>${escapeHtml(coach.summary)}</p>
-      </header>
-      <div class="coach-grid">
-        ${renderCoachList(labels.priorities, coach.priorities)}
-        ${renderCoachList(labels.policyNotes, coach.policyNotes)}
-        ${renderCoachList(labels.studyFocus, coach.studyFocus)}
-      </div>
-    </section>
-  `;
-}
-
-function renderCoachList(title, items, listTag = "ul") {
-  const values = Array.isArray(items) ? items.filter(Boolean).slice(0, 6) : [];
-  const tag = listTag === "ol" ? "ol" : "ul";
-  return `
-    <section class="coach-list-block">
-      <h5>${escapeHtml(title)}</h5>
-      ${
-        values.length
-          ? `<${tag}>${values.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</${tag}>`
-          : `<p>${escapeHtml(explanationLanguage === "zh" ? "还没有识别到这一项。" : "Nothing detected yet.")}</p>`
-      }
-    </section>
-  `;
-}
-
-function renderCourseDirectory(course) {
-  if (!course) {
-    elements.syllabusResult.innerHTML = `
-      <div class="directory-empty">
-        <strong>Upload each course syllabus separately.</strong>
-        <span>Every course gets its own directory for instructor details, grading, policies, weekly guide, exams, and deadlines.</span>
-      </div>
-    `;
-    return;
-  }
-
-  const normalizedCourse = normalizeCourseAssignments(course);
-  const plan = normalizedCourse.coursePlan || {};
-  const deadlines = Array.isArray(plan.deadlines) && plan.deadlines.length ? plan.deadlines : normalizedCourse.deadlines;
-  const exams = Array.isArray(plan.exams) ? plan.exams : [];
-  const topics = Array.isArray(plan.topics) ? plan.topics : [];
-  const grading = Array.isArray(plan.grading) ? plan.grading : [];
-  const weeklyGuide = Array.isArray(plan.weeklyGuide) ? plan.weeklyGuide : [];
-  const policies = Array.isArray(plan.policies) ? plan.policies : [];
-  const requirements = Array.isArray(plan.courseRequirements) ? plan.courseRequirements : [];
-  const syllabusStatus = plan.syllabusUploaded ? "Syllabus uploaded" : "Syllabus needed";
-
-  elements.syllabusResult.innerHTML = `
-    <div class="directory-summary ${plan.syllabusUploaded ? "is-ready" : "is-needed"}">
-      <strong>${escapeHtml(syllabusStatus)} for ${escapeHtml(normalizedCourse.code)}</strong>
-      <span>${escapeHtml(
-        plan.syllabusUploaded
-          ? "This syllabus belongs only to the selected course. Other courses need their own syllabus upload."
-          : "Upload this course's syllabus once to unlock course-level planning."
-      )}</span>
-    </div>
-    ${renderCourseInfoPanel(plan)}
-    ${renderCourseDirectoryUpload(normalizedCourse)}
-    <div class="directory-grid">
-      ${renderDirectoryBlock("Course deadlines", deadlines, (item) => `${item.label} · ${item.date} · ${item.type}`)}
-      ${renderDirectoryBlock("Exams", exams, (item) => `${item.label} · ${item.date}`)}
-      ${renderDirectoryBlock("Topics", topics)}
-      ${renderDirectoryBlock("Course requirements", requirements)}
-      ${renderGradingBlock(grading)}
-      ${renderPolicyBlock(policies)}
-    </div>
-    ${renderWeeklyGuide(weeklyGuide)}
-  `;
-}
-
-function renderCourseDirectoryUpload(course) {
-  return `
-    <form class="directory-upload" id="directoryImportForm">
-      <div class="directory-upload-head">
-        <div>
-          <strong>Upload into ${escapeHtml(course.code)}</strong>
-          <span>Files added here stay inside ${escapeHtml(course.name)} even if Canvas text is incomplete or noisy.</span>
-        </div>
-      </div>
-      <label>
-        Paste this course's syllabus or assignment text
-        <textarea id="directoryMaterial" rows="4" placeholder="Paste a syllabus update, Canvas assignment page, copied due-date text, or OCR text for ${escapeHtml(course.code)}."></textarea>
-      </label>
-      <div class="directory-upload-actions">
-        <label class="directory-file-action">
-          Choose file or screenshot
-          <input type="file" id="directoryFile" accept=".txt,.md,.csv,.png,.jpg,.jpeg,.webp,text/plain,text/markdown,text/csv,image/png,image/jpeg,image/webp">
-        </label>
-        <button type="submit" class="secondary-action">Upload to ${escapeHtml(course.code)}</button>
-      </div>
-    </form>
-  `;
-}
-
-function renderCourseInfoPanel(plan) {
-  const fields = [
-    ["Term", plan.term],
-    ["Professor", plan.professor],
-    ["Credits", plan.credits],
-    ["Section", plan.section],
-    ["Modality", plan.modality],
-    ["Meeting", plan.meetingLocation],
-    ["Office hours", plan.officeHours],
-    ["Email", plan.email]
-  ].filter(([, value]) => value);
-
-  if (fields.length === 0) {
-    return `
-      <div class="course-info-grid">
-        <div class="course-info-item">
-          <span>Course profile</span>
-          <strong>Waiting for syllabus details</strong>
-        </div>
-      </div>
-    `;
-  }
-
-  return `
-    <div class="course-info-grid">
-      ${fields
-        .map(
-          ([label, value]) => `
-            <div class="course-info-item">
-              <span>${escapeHtml(label)}</span>
-              <strong>${escapeHtml(value)}</strong>
-            </div>
-          `
-        )
-        .join("")}
-    </div>
-  `;
-}
-
-function renderDirectoryBlock(title, items, formatter = (item) => item) {
-  const values = Array.isArray(items) ? items.filter(Boolean).slice(0, 6) : [];
-  return `
-    <section class="directory-block">
-      <h4>${escapeHtml(title)}</h4>
-      ${
-        values.length
-          ? `<ul>${values.map((item) => `<li>${escapeHtml(formatter(item))}</li>`).join("")}</ul>`
-          : `<p>No ${escapeHtml(title.toLowerCase())} found yet.</p>`
-      }
-    </section>
-  `;
-}
-
-function renderGradingBlock(items) {
-  const values = Array.isArray(items) ? items.filter(Boolean).slice(0, 8) : [];
-  return `
-    <section class="directory-block">
-      <h4>Grading weights</h4>
-      ${
-        values.length
-          ? `<ul>${values.map((item) => `<li>${escapeHtml(item.label)} · ${escapeHtml(item.weight)}</li>`).join("")}</ul>`
-          : `<p>No grading weights found yet.</p>`
-      }
-    </section>
-  `;
-}
-
-function renderPolicyBlock(items) {
-  const values = Array.isArray(items) ? items.filter(Boolean).slice(0, 4) : [];
-  return `
-    <section class="directory-block">
-      <h4>Policies</h4>
-      ${
-        values.length
-          ? `<ul>${values.map((item) => `<li><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(item.text)}</li>`).join("")}</ul>`
-          : `<p>No course policies found yet.</p>`
-      }
-    </section>
-  `;
-}
-
-function renderWeeklyGuide(items) {
-  const weeks = Array.isArray(items) ? items.filter(Boolean).slice(0, 16) : [];
-  if (weeks.length === 0) return "";
-
-  return `
-    <section class="weekly-guide">
-      <div class="weekly-guide-head">
-        <span class="section-label">Weekly Guide</span>
-        <strong>${weeks.length} weeks from this syllabus</strong>
-      </div>
-      <div class="weekly-grid">
-        ${weeks
-          .map(
-            (week) => `
-              <article class="week-card">
-                <span>${escapeHtml(week.week)}</span>
-                <h4>${escapeHtml(week.topic || "Course work")}</h4>
-                ${renderInlineChips("Assignments", week.assignments)}
-                ${renderInlineChips("Resources", week.resources)}
-              </article>
-            `
-          )
-          .join("")}
-      </div>
-    </section>
-  `;
-}
-
-function renderInlineChips(label, values = []) {
-  const items = Array.isArray(values) ? values.filter(Boolean).slice(0, 4) : [];
-  if (items.length === 0) return "";
-  return `
-    <div class="inline-chip-group">
-      <strong>${escapeHtml(label)}</strong>
-      <div>${items.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>
-    </div>
-  `;
-}
-
-function renderAssignmentWorkplans(course) {
-  if (!course) {
-    elements.breakdownResult.innerHTML = `
-      <div class="workplan-empty">
-        <strong>Upload an assignment page or prompt.</strong>
-        <span>ClassPilot will extract requirements, deliverables, rubric signals, and a step-by-step plan from that single upload.</span>
-      </div>
-    `;
-    return;
-  }
-
-  const assignments = normalizeCourseAssignments(course).assignments || [];
-  if (assignments.length === 0) {
-    elements.breakdownResult.innerHTML = `
-      <div class="workplan-empty">
-        <strong>No assignments in this course yet.</strong>
-        <span>The syllabus is saved in the course directory. Upload each assignment page once when you receive it.</span>
-      </div>
-    `;
-    return;
-  }
-
-  elements.breakdownResult.innerHTML = assignments
-    .map((assignment) => renderAssignmentWorkplanCard(assignment))
-    .join("");
-}
-
-function renderAssignmentWorkplanCard(assignment) {
-  const details = assignment.details || {};
-  const requirements = details.requirements?.length ? details.requirements : buildFallbackRequirements(assignment);
-  const steps = details.steps?.length ? details.steps : buildFallbackSteps(assignment);
-  const deliverables = details.deliverables || [];
-  const rubric = details.rubric || [];
-  const overview = details.overview || "ClassPilot built this plan from the uploaded assignment material.";
-
-  return `
-    <article class="workplan-card">
-      <header>
-        <span>${escapeHtml(assignment.sourceType || "Assignment")}</span>
-        <h4>${escapeHtml(assignment.title)}</h4>
-        <p>${escapeHtml(overview)}</p>
-      </header>
-      <div class="workplan-columns">
-        ${renderWorkplanList("Must include", requirements)}
-        ${renderWorkplanList("How to finish", steps, "ol")}
-        ${renderWorkplanList("Deliverables", deliverables)}
-        ${renderRubricList(rubric)}
-      </div>
-    </article>
-  `;
-}
-
-function renderWorkplanList(title, items, listTag = "ul") {
-  const values = Array.isArray(items) ? items.filter(Boolean).slice(0, 8) : [];
-  const tag = listTag === "ol" ? "ol" : "ul";
-  return `
-    <section class="workplan-block">
-      <h5>${escapeHtml(title)}</h5>
-      ${
-        values.length
-          ? `<${tag}>${values.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</${tag}>`
-          : `<p>Nothing specific found yet.</p>`
-      }
-    </section>
-  `;
-}
-
-function renderRubricList(rubric) {
-  const values = Array.isArray(rubric) ? rubric.filter(Boolean).slice(0, 6) : [];
-  return `
-    <section class="workplan-block">
-      <h5>Rubric signals</h5>
-      ${
-        values.length
-          ? `<ul>${values
-              .map((item) => `<li><strong>${escapeHtml(item.label)} ${escapeHtml(item.weight || "")}</strong>${item.description ? `: ${escapeHtml(item.description)}` : ""}</li>`)
-              .join("")}</ul>`
-          : `<p>No explicit rubric detected.</p>`
-      }
-    </section>
-  `;
-}
-
-function buildFallbackRequirements(assignment) {
-  const requirements = [];
-  if (assignment.dueDate && assignment.dueDate !== "No date") requirements.push(`Due ${assignment.dueDate}`);
-  if (assignment.points) requirements.push(assignment.points);
-  if (assignment.status?.submittedAt) requirements.push(`Submitted on ${assignment.status.submittedAt}`);
-  if (assignment.status?.nextUp) requirements.push(`Next up: ${assignment.status.nextUp}`);
-  return requirements.length ? requirements : ["Review the uploaded prompt and confirm the final submission format."];
-}
-
-function buildFallbackSteps(assignment) {
-  const taskTitles = (assignment.tasks || []).map((task) => task.title).filter(Boolean);
-  if (taskTitles.length) return taskTitles;
-  return ["Read the prompt", "Identify deliverables", "Draft the response", "Check the rubric before submitting"];
-}
-
-function renderExamPlanner(course) {
-  if (!course) {
-    elements.studyPlan.innerHTML = `
-      <div class="planner-empty">
-        <strong>No course selected.</strong>
-        <span>Upload one syllabus for each course. Exam planning appears only inside that course.</span>
-      </div>
-    `;
-    return;
-  }
-
-  const plan = normalizeCourseAssignments(course).coursePlan || {};
-  const exams = Array.isArray(plan.exams) ? plan.exams : [];
-  if (!plan.syllabusUploaded) {
-    elements.studyPlan.innerHTML = `
-      <div class="planner-empty">
-        <strong>Upload this course's syllabus for exam planning.</strong>
-        <span>Exam dates are course-level information, so they stay separate for every course.</span>
-      </div>
-    `;
-    return;
-  }
-
-  if (exams.length === 0) {
-    elements.studyPlan.innerHTML = `
-      <div class="planner-empty">
-        <strong>No exams found in this course's syllabus.</strong>
-        <span>Course-level deadlines and weekly work still appear in the directory above.</span>
-      </div>
-    `;
-    return;
-  }
-
-  elements.studyPlan.innerHTML = exams
-    .map(
-      (exam) => `
-        <article class="exam-plan">
-          <header>
-            <strong>${escapeHtml(exam.label)}</strong>
-            <span>${escapeHtml(exam.date)}</span>
-          </header>
-          <ol>
-            <li>Collect lecture topics and weak areas for this exam.</li>
-            <li>Build one review sheet from syllabus topics and class notes.</li>
-            <li>Practice problems or sample questions before the exam date.</li>
-          </ol>
-        </article>
-      `
-    )
-    .join("");
-}
-
-function capitalize(value) {
-  return String(value)
-    .split(" ")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
+  invalidateUndo();
+  return true;
 }
 
 function showStatus(message, tone = "info") {
+  if (!elements.appStatus) return;
   elements.appStatus.textContent = message;
-  elements.appStatus.className = `app-status is-${tone}`;
+  elements.appStatus.classList.toggle("is-success", tone === "success");
+  elements.appStatus.classList.toggle("is-warn", tone === "warn");
 }
 
-function formatFileSize(bytes) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "unknown size";
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+function reportStorageFailure(action, error) {
+  console.error("ClassPilot browser storage " + action + " failed.", error);
+  const guidance = action === "load" || state.storageRecoveryRequired
+    ? " The stored value was left unchanged. Restore a backup or clear the workspace before editing."
+    : " Keep this tab open, free browser storage, then try again. You can still export a backup.";
+  showStatus("Browser storage could not " + action + " your workspace." + guidance, "warn");
 }
 
-function getCurrentActionAvailability() {
-  return getActionAvailability({
-    hasCourse: Boolean(getActiveCourse()),
-    material: elements.courseMaterial.value,
-    deadlineCount: 0,
-    taskTitle: elements.taskTitle.value,
-    courseCount: courses.length
-  });
-}
-
-function setButtonState(button, state) {
-  button.disabled = !state.enabled;
-  button.setAttribute("aria-disabled", String(!state.enabled));
-  button.title = state.message;
-}
-
-function refreshActionStates() {
-  const state = getCurrentActionAvailability();
-  setButtonState(
-    elements.buildCourseButton,
-    importIsBusy ? { enabled: false, message: "Reading the uploaded file." } : state.buildCourse
-  );
-  setButtonState(elements.addTaskButton, state.addTask);
-  setButtonState(elements.deleteCourse, state.deleteCourse);
-  setButtonState(elements.clearCourses, state.clearData);
-  elements.courseFile.disabled = importIsBusy;
-  elements.buildCourseButton.textContent = pendingImportDraft ? "Save reviewed course" : "Build course";
-}
-
-function setImportBusy(isBusy) {
-  importIsBusy = isBusy;
-  refreshActionStates();
-}
-
-function readFileAsText(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener("load", () => resolve(String(reader.result || "")));
-    reader.addEventListener("error", () => reject(new Error("File could not be read.")));
-    reader.readAsText(file);
-  });
-}
-
-function showScreenshotPreview(file) {
-  if (screenshotPreviewUrl) {
-    URL.revokeObjectURL(screenshotPreviewUrl);
+function parseCurrentWorkspace(raw, now) {
+  const parsed = JSON.parse(raw);
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed) ||
+    parsed.schemaVersion !== 7
+  ) {
+    throw new Error("Stored workspace is not a valid version 7 workspace.");
   }
-  screenshotPreviewUrl = URL.createObjectURL(file);
-  elements.screenshotPreview.src = screenshotPreviewUrl;
-  elements.screenshotPreviewCard.hidden = false;
-  elements.screenshotPreviewMeta.textContent = `${file.name} · ${formatFileSize(file.size)}`;
-  elements.screenshotOcrProgress.textContent = "Queued";
+  return enrichWorkspacePlanningFields(parseWorkspaceBackup(raw), now);
 }
 
-function updateScreenshotProgress(message) {
-  elements.screenshotOcrProgress.textContent = message;
-}
-
-function waitForScreenshotOcr(timeoutMs = 8000) {
-  if (window.Tesseract?.recognize) return Promise.resolve(true);
-  const script = document.querySelector("[data-ocr-script]");
-  if (!script) return Promise.resolve(false);
-  updateScreenshotProgress("Loading OCR engine");
-
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      resolve(Boolean(window.Tesseract?.recognize));
-    };
-    script.addEventListener("load", finish, { once: true });
-    script.addEventListener("error", finish, { once: true });
-    window.setTimeout(finish, timeoutMs);
-  });
-}
-
-function getOcrAssetUrl(filename = "") {
-  return new URL(`vendor/tesseract/${filename}`, window.location.href).href;
-}
-
-function getOcrLangPath() {
-  return new URL("vendor/tesseract", window.location.href).href;
-}
-
-function renderSmartReadout(draft) {
-  const evidence = Array.isArray(draft.evidence) ? draft.evidence : [];
-  const warnings = Array.isArray(draft.warnings) ? draft.warnings : [];
-  const actionPlan = Array.isArray(draft.actionPlan) ? draft.actionPlan : [];
-  const confidence = Number(draft.confidence) || 0;
-  const tone = confidence >= 86 ? "high" : confidence >= 65 ? "mid" : "low";
-  const evidenceMarkup = evidence.length
-    ? evidence
-        .map(
-          (item) => `
-            <span class="evidence-chip" title="${escapeHtml(item.source)}">
-              <strong>${escapeHtml(item.label)}</strong>
-              ${escapeHtml(item.value)}
-            </span>
-          `
-        )
-        .join("")
-    : `<span class="review-warning">No strong evidence found yet.</span>`;
-  const warningMarkup = warnings.length
-    ? `<ul class="review-warnings">${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>`
-    : `<p class="review-ok">No obvious missing fields detected.</p>`;
-  const planMarkup = actionPlan.length
-    ? `<ol class="review-plan">${actionPlan.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>`
-    : "";
-
-  elements.reviewSmartReadout.innerHTML = `
-    <div class="smart-score is-${tone}">
-      <span>${escapeHtml(draft.sourceType || "Course material")}</span>
-      <strong>${confidence}%</strong>
-      <span>${escapeHtml(draft.confidenceLabel || "Needs review")}</span>
-    </div>
-    <div class="evidence-list">${evidenceMarkup}</div>
-    ${warningMarkup}
-    ${planMarkup}
-  `;
-}
-
-function renderImportReview(draft) {
-  pendingImportDraft = draft;
-  elements.importReviewCard.hidden = false;
-  renderSmartReadout(draft);
-  elements.reviewCourseCode.value = draft.code || "";
-  elements.reviewCourseName.value = draft.name || "";
-  elements.reviewAssignment.value = draft.assignment || "";
-  elements.reviewDueDate.value = draft.dueDate || "";
-  elements.reviewPoints.value = draft.points || "";
-  elements.reviewLinks.value = draft.linksText || "";
-  elements.reviewTasks.value = draft.tasksText || "";
-  elements.reviewRawText.value = draft.rawText || "";
-  elements.importReviewCard.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  refreshActionStates();
-}
-
-function clearImportReview() {
-  pendingImportDraft = null;
-  elements.importReviewCard.hidden = true;
-  elements.reviewCourseCode.value = "";
-  elements.reviewCourseName.value = "";
-  elements.reviewAssignment.value = "";
-  elements.reviewDueDate.value = "";
-  elements.reviewPoints.value = "";
-  elements.reviewLinks.value = "";
-  elements.reviewTasks.value = "";
-  elements.reviewRawText.value = "";
-  elements.reviewSmartReadout.innerHTML = "";
-  refreshActionStates();
-}
-
-function getReviewDraft() {
-  const code = elements.reviewCourseCode.value;
-  const name = elements.reviewCourseName.value;
-  const warnings = (pendingImportDraft?.warnings || []).filter((warning) => {
-    if (code.trim() && warning.includes("Course code")) return false;
-    if (name.trim() && warning.includes("Course name")) return false;
-    return true;
-  });
-
-  return {
-    ...(pendingImportDraft || {}),
-    code,
-    name,
-    assignment: elements.reviewAssignment.value,
-    dueDate: elements.reviewDueDate.value,
-    points: elements.reviewPoints.value,
-    linksText: elements.reviewLinks.value,
-    tasksText: elements.reviewTasks.value,
-    rawText: elements.reviewRawText.value,
-    warnings
-  };
-}
-
-async function readScreenshotText(file) {
-  showScreenshotPreview(file);
-
-  const ocrReady = await waitForScreenshotOcr();
-  if (!ocrReady) {
-    throw new Error("Screenshot OCR is not available. Check your internet connection, then reload the page and try again.");
+function parseLegacyCourses(raw) {
+  if (raw === null) return [];
+  const parsed = JSON.parse(raw);
+  if (!Array.isArray(parsed)) {
+    throw new Error("Legacy course storage must contain a course list.");
   }
-
-  const result = await window.Tesseract.recognize(
-    file,
-    "eng",
-    {
-      workerPath: getOcrAssetUrl("worker.min.js"),
-      corePath: getOcrAssetUrl("tesseract-core.wasm.js"),
-      langPath: getOcrLangPath(),
-      logger(event) {
-        if (!event.status) return;
-        const percent = typeof event.progress === "number" ? ` ${Math.round(event.progress * 100)}%` : "";
-        updateScreenshotProgress(`${capitalize(event.status)}${percent}`);
-      }
-    }
-  );
-
-  return String(result?.data?.text || "").trim();
+  return parsed;
 }
 
-async function importScreenshotFile(file, options = {}) {
-  setImportBusy(true);
-  showStatus(`Reading screenshot ${file.name}. This can take a moment the first time.`, "info");
-
+function loadWorkspace() {
+  const now = new Date();
   try {
-    const text = await readScreenshotText(file);
-    if (!text) {
-      showStatus("No readable text was found in that screenshot. Try a clearer crop or paste the text manually.", "warn");
-      updateScreenshotProgress("No readable text found");
-      return;
+    const current = localStorage.getItem(WORKSPACE_KEY);
+    if (current !== null) {
+      const loaded = parseCurrentWorkspace(current, now);
+      state.storageAvailable = true;
+      state.storageRecoveryRequired = false;
+      return loaded;
     }
 
-    elements.courseMaterial.value = text;
-    const draft = draftFromImportSource(text, file.name, options);
-    if (shouldAutoSaveDraft(draft)) {
-      saveCourseFromDraft(draft);
-      updateScreenshotProgress(`${draft.sourceType} · auto-saved`);
-      return;
-    }
-
-    renderImportReview(draft);
-    updateScreenshotProgress(`${draft.sourceType} · ${draft.confidence}% confidence`);
-    showStatus(
-      draft.warnings?.length
-        ? "Screenshot text extracted, but some fields need correction before saving."
-        : options.bindToActiveCourse
-          ? `Screenshot text extracted for ${draft.code}. Review once, then save.`
-          : "Screenshot text extracted with high confidence. Review once, then save.",
-      draft.warnings?.length ? "warn" : "success"
+    const legacyValue = localStorage.getItem(LEGACY_KEY);
+    const legacyCourses = parseLegacyCourses(legacyValue);
+    const migrated = enrichWorkspacePlanningFields(
+      migrateLegacyCourses(legacyCourses, now),
+      now
     );
+    const serializedMigrated = JSON.stringify(migrated);
+
+    parseCurrentWorkspace(serializedMigrated, now);
+    localStorage.setItem(WORKSPACE_KEY, serializedMigrated);
+    const verifiedValue = localStorage.getItem(WORKSPACE_KEY);
+    if (verifiedValue === null) {
+      throw new Error("The migrated workspace could not be read back.");
+    }
+    const loaded = parseCurrentWorkspace(verifiedValue, now);
+    state.storageAvailable = true;
+    state.storageRecoveryRequired = false;
+    return loaded;
   } catch (error) {
-    updateScreenshotProgress("OCR unavailable");
-    showStatus(error.message, "warn");
-  } finally {
-    setImportBusy(false);
+    state.storageAvailable = false;
+    state.storageRecoveryRequired = true;
+    reportStorageFailure("load", error);
+    return createEmptyWorkspace(now);
   }
 }
 
-function renderAll() {
-  const course = getActiveCourse();
-  setCourseTheme(course);
-  renderCourses();
-  renderTermPulse();
-  renderCourseHeader(course);
-  renderWeekRail(course);
-  renderTasks(course);
-  renderSourceCheck(course);
-  renderCourseDirectory(course);
-  renderAssignmentWorkplans(course);
-  renderExamPlanner(course);
-  renderCoach(course);
-  refreshActionStates();
-}
-
-function draftHasRequiredFields(draft) {
-  if (draft.sourceType === "Syllabus or schedule") {
-    return Boolean(draft.code?.trim() && draft.name?.trim());
-  }
-  return Boolean(draft.code?.trim() && draft.name?.trim() && draft.assignment?.trim() && draft.dueDate?.trim());
-}
-
-function shouldAutoSaveDraft(draft) {
-  return draftHasRequiredFields(draft) && Number(draft.confidence) >= 86 && (!draft.warnings || draft.warnings.length === 0);
-}
-
-function saveCourseFromDraft(draft, message = "") {
-  const result = upsertCourseFromDraft(courses, draft, activeCourseId);
-  if (result.action === "needs-course") {
-    showStatus(result.message, "warn");
-    renderImportReview(draft);
-    return null;
-  }
-
-  courses = result.courses;
-  activeCourseId = result.activeCourseId;
-  saveCourses();
-  elements.courseImportForm.reset();
-  clearImportReview();
-  renderAll();
-  const actionMessage =
-    result.action === "course-created" || result.action === "course-updated"
-      ? `Course directory saved for ${result.course.code}: ${result.course.name}.`
-      : `${result.action === "merged" ? "Added to" : "Created"} ${result.course.code}: ${result.course.name} · ${result.assignment.title}.`;
-  showStatus(message || actionMessage, "success");
-  return result.course;
-}
-
-function draftFromImportSource(source, filename = "", options = {}) {
-  const rawDraft = createCourseDraftFromMaterial(source, filename);
-  if (options.bindToActiveCourse) {
-    return bindDraftToCourse(rawDraft, getActiveCourse());
-  }
-  return applyCourseContextToDraft(rawDraft, getActiveCourse());
-}
-
-function importCourseFromMaterial(material, filename = "", options = {}) {
-  const source = String(material || "").trim();
-  if (!source) {
-    showStatus(
-      options.bindToActiveCourse
-        ? "Paste text or choose a file inside this course directory first."
-        : getCurrentActionAvailability().buildCourse.message,
-      "warn"
+function saveWorkspace(options = {}) {
+  if (
+    state.storageRecoveryRequired &&
+    options.allowStorageRecovery !== true
+  ) {
+    reportStorageFailure(
+      "save",
+      new Error("Stored version 7 data must be restored or cleared first.")
     );
-    refreshActionStates();
-    return null;
+    return false;
   }
-
-  const draft = draftFromImportSource(source, filename, options);
-  if (shouldAutoSaveDraft(draft)) {
-    return saveCourseFromDraft(draft);
+  try {
+    const now = new Date();
+    const nextWorkspace = enrichWorkspacePlanningFields(workspace, now);
+    nextWorkspace.metadata.updatedAt = now.toISOString();
+    const serialized = JSON.stringify(nextWorkspace);
+    localStorage.setItem(WORKSPACE_KEY, serialized);
+    const verifiedValue = localStorage.getItem(WORKSPACE_KEY);
+    if (verifiedValue === null) {
+      throw new Error("The saved workspace could not be read back.");
+    }
+    workspace = parseCurrentWorkspace(verifiedValue, now);
+    state.storageAvailable = true;
+    state.storageRecoveryRequired = false;
+    return true;
+  } catch (error) {
+    state.storageAvailable = false;
+    reportStorageFailure("save", error);
+    return false;
   }
+}
 
-  renderImportReview(draft);
-  showStatus(
-    options.bindToActiveCourse
-      ? `ClassPilot prepared this upload for ${draft.code}. Review once before saving.`
-      : "ClassPilot prepared a smart extraction, but it needs review before saving.",
-    "warn"
-  );
+function refreshIcons() {
+  window.lucide?.createIcons({
+    attrs: {
+      "aria-hidden": "true",
+      focusable: "false"
+    }
+  });
+}
+
+function focusIdentityFor(element) {
+  if (!element) return null;
+  if (element.dataset?.focusKey) {
+    return {
+      selector: "[data-focus-key]",
+      values: { focusKey: element.dataset.focusKey }
+    };
+  }
+  if (element.id) return { id: element.id };
+  const identities = [
+    ["editAssignment", "[data-edit-assignment]", ["courseId", "assignmentId"]],
+    ["editCoursePlan", "[data-edit-course-plan]", ["courseId"]],
+    ["action", "[data-action]", ["action", "courseId"]]
+  ];
+  for (const [marker, selector, keys] of identities) {
+    if (element.dataset?.[marker] === undefined) continue;
+    return {
+      selector,
+      values: Object.fromEntries(keys.map((key) => [
+        key,
+        element.dataset[key] || ""
+      ]))
+    };
+  }
   return null;
 }
 
-function importCourseFromReviewedDraft() {
-  if (!pendingImportDraft) return importCourseFromMaterial(elements.courseMaterial.value);
+function resolveFocusIdentity(identity) {
+  if (!identity) return null;
+  if (identity.id) return document.querySelector("#" + identity.id);
+  return Array.from(document.querySelectorAll(identity.selector)).find(
+    (element) => Object.entries(identity.values).every(
+      ([key, value]) => (element.dataset[key] || "") === value
+    )
+  ) || null;
+}
 
-  const draft = getReviewDraft();
-  const isCourseLevel = draft.sourceType === "Syllabus or schedule";
-  if (!draft.code.trim() || !draft.name.trim() || (!isCourseLevel && (!draft.assignment.trim() || !draft.dueDate.trim()))) {
-    showStatus(
-      isCourseLevel
-        ? "Review the course code and course name before saving the syllabus."
-        : "Review the course code, course name, assignment, and due date before saving.",
-      "warn"
-    );
-    return null;
+function showDialog(dialog, opener) {
+  const focusTarget = opener || document.activeElement;
+  if (focusTarget?.focus) {
+    dialogOpeners.set(dialog, {
+      identity: focusIdentityFor(focusTarget),
+      node: focusTarget
+    });
+  }
+  if (typeof dialog.showModal === "function" && !dialog.open) {
+    dialog.showModal();
+  }
+}
+
+function restoreDialogFocus(dialog) {
+  const opener = dialogOpeners.get(dialog);
+  dialogOpeners.delete(dialog);
+  if (!opener) return;
+  const replacement = resolveFocusIdentity(opener.identity);
+  const focusTarget = replacement?.isConnected
+    ? replacement
+    : opener.node?.isConnected
+      ? opener.node
+      : null;
+  focusTarget?.focus?.();
+}
+
+function suppressDialogFocusReturn(dialog) {
+  dialogOpeners.delete(dialog);
+}
+
+function normalizedView(value) {
+  const view = String(value || "").replace(/^#/, "").toLowerCase();
+  return VALID_VIEWS.includes(view) ? view : "today";
+}
+
+function routeFromHash() {
+  const hashView = String(window.location.hash || "").replace(/^#/, "");
+  if (hashView) return normalizedView(hashView);
+  return normalizedView(workspace?.preferences?.activeView);
+}
+
+function renderNavigation() {
+  const markup = NAV_ITEMS.map(([view, icon, label]) => (
+    '<button type="button" data-view="' + view + '" aria-label="Open ' +
+      label + '" title="Open ' + label + '">' +
+      '<i data-lucide="' + icon + '" aria-hidden="true"></i>' +
+      "<span>" + label + "</span>" +
+    "</button>"
+  )).join("");
+
+  elements.appNav.innerHTML = markup;
+  elements.mobileNav.innerHTML = markup;
+  refreshIcons();
+}
+
+function courseColor(index) {
+  return COURSE_COLORS[index % COURSE_COLORS.length];
+}
+
+function renderCourseRail() {
+  if (workspace.courses.length === 0) {
+    elements.courseList.innerHTML =
+      '<p class="empty-state">No courses yet. Open Courses to begin setting up your workspace.</p>';
+    return;
   }
 
-  return saveCourseFromDraft(
-    draft,
-    isCourseLevel ? `Saved syllabus directory: ${draft.code}: ${draft.name}.` : `Saved reviewed assignment: ${draft.code}: ${draft.name} · ${draft.assignment}.`
+  elements.courseList.innerHTML = workspace.courses.map((course, index) => {
+    const selected = course.id === workspace.preferences.activeCourseId;
+    const assignmentCount = Array.isArray(course.assignments)
+      ? course.assignments.length
+      : 0;
+    const code = course.code || "Course";
+    const name = course.name || "Untitled course";
+    return (
+      '<button class="course-button' + (selected ? " active" : "") + '"' +
+        ' type="button" data-select-course data-course-id="' +
+        escapeHtml(course.id) + '"' +
+        ' style="--course-color: ' + courseColor(index) + '"' +
+        ' aria-current="' + (selected ? "true" : "false") + '">' +
+        '<span class="course-code">' + escapeHtml(code) + "</span>" +
+        "<span>" + escapeHtml(name) + "</span>" +
+        '<span class="course-meta">' + assignmentCount +
+          " assignment" + (assignmentCount === 1 ? "" : "s") + "</span>" +
+      "</button>"
+    );
+  }).join("");
+}
+
+function getActiveCourse() {
+  return workspace.courses.find(
+    (course) => course.id === workspace.preferences.activeCourseId
+  ) || workspace.courses[0] || null;
+}
+
+function formatEstimate(estimateMinutes) {
+  const minutes = Math.max(0, Number(estimateMinutes) || 0);
+  if (minutes < 60) return "Estimated " + minutes + " min";
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return "Estimated " + hours + " hr" +
+    (remainder ? " " + remainder + " min" : "");
+}
+
+function formatAbsoluteDeadline(item) {
+  if (!item.dueAt) return item.dueDate || "No due date";
+  const due = new Date(item.dueAt);
+  if (!Number.isFinite(due.getTime())) return item.dueDate || "No due date";
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(due);
+}
+
+function deadlineSignal(item, now = new Date()) {
+  if (!item.dueAt) {
+    return { className: "is-undated", text: "Needs a due date" };
+  }
+
+  const due = new Date(item.dueAt).getTime();
+  if (!Number.isFinite(due)) {
+    return { className: "is-undated", text: "Needs a due date" };
+  }
+
+  const deltaMs = due - now.getTime();
+  const absoluteHours = Math.max(1, Math.ceil(Math.abs(deltaMs) / 3600000));
+  if (deltaMs === 0) {
+    return { className: "is-due-soon", text: "Due now" };
+  }
+  if (deltaMs < 0) {
+    return {
+      className: "is-overdue",
+      text: "Overdue by " + formatRelativeHours(absoluteHours)
+    };
+  }
+  if (deltaMs <= 24 * 3600000) {
+    return {
+      className: "is-due-soon",
+      text: "Due soon - " + formatRelativeHours(absoluteHours) + " left"
+    };
+  }
+  return {
+    className: "is-planned",
+    text: "Due in " + formatRelativeHours(absoluteHours)
+  };
+}
+
+function formatRelativeHours(hours) {
+  if (hours <= 48) return hours + " hour" + (hours === 1 ? "" : "s");
+  const days = Math.ceil(hours / 24);
+  return days + " day" + (days === 1 ? "" : "s");
+}
+
+function priorityBandLabel(value) {
+  return {
+    "do-now": "Do now",
+    "do-next": "Do next",
+    planned: "Planned"
+  }[value] || "Planned";
+}
+
+function renderFocusItem(item, position) {
+  const signal = deadlineSignal(item);
+  const remainingMinutes = item.estimatedRemainingMinutes ??
+    item.estimateMinutes;
+  return (
+    '<button class="focus-item ' + signal.className + '" type="button"' +
+      ' data-course-id="' + escapeHtml(item.courseId) + '"' +
+      ' data-assignment-id="' + escapeHtml(item.id) + '">' +
+      '<span class="focus-position">' + escapeHtml(position) + "</span>" +
+      '<span class="focus-content">' +
+        '<span class="assignment-kicker">' +
+          escapeHtml(item.courseCode || "Course") + "</span>" +
+        "<strong>" + escapeHtml(item.title) + "</strong>" +
+        '<span class="priority-band priority-' +
+          escapeHtml(item.priorityBand || "planned") + '">' +
+          escapeHtml(priorityBandLabel(item.priorityBand)) + "</span>" +
+        '<span class="focus-deadline">' + escapeHtml(signal.text) +
+          " | " + escapeHtml(formatAbsoluteDeadline(item)) + "</span>" +
+        '<span class="focus-estimate">' +
+          escapeHtml(formatEstimate(remainingMinutes)) + " remaining</span>" +
+        '<span class="focus-next"><span>Next action</span> ' +
+          escapeHtml(item.nextAction || "Review the assignment requirements") +
+        "</span>" +
+      "</span>" +
+      '<i data-lucide="chevron-right" aria-hidden="true"></i>' +
+    "</button>"
   );
 }
 
-function addTaskFromForm() {
-  const course = getActiveCourse();
-  const state = getCurrentActionAvailability();
-  if (!state.addTask.enabled) {
-    showStatus(state.addTask.message, "warn");
-    refreshActionStates();
-    return;
+function renderQueueGroup(items, emptyMessage, positionPrefix) {
+  if (items.length === 0) {
+    return '<p class="empty-state light">' + emptyMessage + "</p>";
   }
-
-  const updatedCourse = addTaskToCourse(course, elements.taskTitle.value);
-  courses = courses.map((item) => (item.id === updatedCourse.id ? updatedCourse : item));
-  saveCourses();
-  elements.taskForm.reset();
-  renderAll();
-  showStatus("Task added to the selected course.", "success");
+  return items.map((item, index) =>
+    renderFocusItem(item, positionPrefix + (index + 1))
+  ).join("");
 }
 
-function deleteActiveCourse() {
-  const course = getActiveCourse();
-  const state = getCurrentActionAvailability();
-  if (!course || !state.deleteCourse.enabled) {
-    showStatus(state.deleteCourse.message, "warn");
-    refreshActionStates();
-    return;
-  }
-
-  deleteCourseById(course.id);
+function renderRecentlyCompleted(items) {
+  const assignments = Array.isArray(items) ? items : [];
+  const content = assignments.length === 0
+    ? '<p class="empty-state light">No recently completed work yet.</p>'
+    : '<ul class="recent-completed-list">' + assignments.map((item) => (
+      "<li>" +
+        '<button type="button" class="recent-completed-item"' +
+          ' data-course-id="' + escapeHtml(item.courseId) + '"' +
+          ' data-assignment-id="' + escapeHtml(item.id) + '">' +
+          "<span><strong>" + escapeHtml(item.title || "Untitled assignment") +
+          "</strong><small>" +
+          escapeHtml(item.courseCode || item.courseName || "Course") +
+          "</small></span>" +
+          '<span class="completion-status">' +
+          escapeHtml(item.completionLabel || "Completed") + "</span>" +
+        "</button>" +
+      "</li>"
+    )).join("") + "</ul>";
+  return (
+    '<section class="focus-group recently-completed"' +
+      ' aria-labelledby="recentlyCompletedHeading">' +
+      '<h2 id="recentlyCompletedHeading">Recently completed</h2>' +
+      content +
+    "</section>"
+  );
 }
 
-function deleteCourseById(courseId) {
-  const course = courses.find((item) => item.id === courseId);
-  if (!course) {
-    showStatus("That course was already removed.", "warn");
-    renderAll();
-    return;
-  }
-
-  const result = removeCourseById(courses, course.id, activeCourseId);
-  courses = result.courses;
-  activeCourseId = result.activeCourseId;
-  saveCourses();
-  renderAll();
-  showStatus(`${course.code}: ${course.name} was deleted.`, "success");
+function renderFocusRail(queue) {
+  return (
+    '<div class="focus-rail">' +
+      '<section class="focus-group focus-now" aria-labelledby="nowHeading">' +
+        '<h2 id="nowHeading">Now</h2>' +
+        renderFocusItem(queue.now, "1") +
+      "</section>" +
+      '<section class="focus-group" aria-labelledby="upNextHeading">' +
+        '<h2 id="upNextHeading">Up next</h2>' +
+        renderQueueGroup(queue.upNext, "Nothing else is waiting.", "") +
+      "</section>" +
+      '<section class="focus-group" aria-labelledby="thisWeekHeading">' +
+        '<h2 id="thisWeekHeading">This week</h2>' +
+        renderQueueGroup(
+          queue.thisWeek,
+          "No dated assignments are due in the next seven days.",
+          ""
+        ) +
+      "</section>" +
+      renderRecentlyCompleted(queue.recentlyCompleted) +
+    "</div>"
+  );
 }
 
-elements.courseList.addEventListener("click", (event) => {
-  const deleteButton = event.target.closest("[data-delete-course-id]");
-  if (deleteButton) {
-    deleteCourseById(deleteButton.dataset.deleteCourseId);
-    return;
-  }
+function renderEmptyToday() {
+  const hasCourses = workspace.courses.length > 0;
+  return (
+    '<section class="empty-state light today-empty">' +
+      "<h2>" + (hasCourses ? "No active assignments" : "Start with your courses") +
+      "</h2>" +
+      "<p>" + (hasCourses
+        ? "Your saved courses have no active work. Open Courses to review them."
+        : "Set up a course first, then Today will organize its assignments by urgency.") +
+      "</p>" +
+      '<button type="button" class="primary-action" data-action="open-courses">' +
+        '<i data-lucide="book-open" aria-hidden="true"></i>' +
+        "<span>Open Courses</span>" +
+      "</button>" +
+    "</section>"
+  );
+}
 
-  const button = event.target.closest("[data-course-id]");
-  if (!button) return;
-  activeCourseId = button.dataset.courseId;
-  renderAll();
-  const course = getActiveCourse();
-  if (course) {
-    showStatus(`Viewing ${course.code}: ${course.name}.`, "info");
-  }
-});
+function upcomingThisWeek(items, now) {
+  const start = now.getTime();
+  const end = start + 7 * 86400000;
+  return items.filter((item) => {
+    const due = new Date(item.dueAt).getTime();
+    return Number.isFinite(due) && due >= start && due <= end;
+  });
+}
 
-elements.taskList.addEventListener("change", (event) => {
-  const checkbox = event.target.closest("[data-task-id]");
-  if (!checkbox) return;
-  const course = getActiveCourse();
-  if (!course) return;
-  const task = course.tasks.find((item) => item.id === checkbox.dataset.taskId);
-  if (task) {
-    task.done = checkbox.checked;
-    (course.assignments || []).forEach((assignment) => {
-      (assignment.tasks || []).forEach((assignmentTask) => {
-        if (assignmentTask.id === checkbox.dataset.taskId) {
-          assignmentTask.done = checkbox.checked;
-        }
-      });
+function renderToday() {
+  const now = new Date();
+  const queue = buildTodayQueue(workspace, now);
+  queue.thisWeek = upcomingThisWeek(queue.thisWeek, now);
+  elements.todayView.innerHTML = queue.now
+    ? renderFocusRail(queue)
+    : renderEmptyToday() + renderRecentlyCompleted(queue.recentlyCompleted);
+  refreshIcons();
+}
+
+function assignmentDetailItemText(item) {
+  if (typeof item === "string") return item;
+  return item?.title || item?.label || item?.text || "";
+}
+
+function renderAssignmentDetailList(items, emptyMessage) {
+  const values = (Array.isArray(items) ? items : [])
+    .map(assignmentDetailItemText)
+    .filter(Boolean);
+  if (values.length === 0) {
+    return '<p class="empty-state light">' + emptyMessage + "</p>";
+  }
+  return "<ul>" + values.map((value) =>
+    "<li>" + escapeHtml(value) + "</li>"
+  ).join("") + "</ul>";
+}
+
+function renderAssignmentTasks(course, assignment) {
+  const tasks = Array.isArray(assignment.tasks) ? assignment.tasks : [];
+  if (tasks.length === 0) {
+    return '<p class="empty-state light">No checklist tasks are recorded for this assignment.</p>';
+  }
+  return "<ul>" + tasks.map((task) => {
+    const title = assignmentDetailItemText(task) || "Untitled task";
+    const target = "task: " + title;
+    return (
+      "<li>" +
+        '<label><input type="checkbox" data-task-id="' +
+          escapeHtml(task.id) + '" data-course-id="' +
+          escapeHtml(course.id) + '" data-assignment-id="' +
+          escapeHtml(assignment.id) + '" aria-label="Mark ' +
+          escapeHtml(target) + ' complete"' +
+          (task.done ? " checked" : "") + ">" +
+          escapeHtml(title) + "</label>" +
+        '<button type="button" data-edit-task data-task-id="' +
+          escapeHtml(task.id) + '" data-course-id="' +
+          escapeHtml(course.id) + '" data-assignment-id="' +
+          escapeHtml(assignment.id) + '" data-focus-key="task-edit-' +
+          escapeHtml(course.id) + "-" + escapeHtml(assignment.id) + "-" +
+          escapeHtml(task.id) + '" aria-label="Edit ' +
+          escapeHtml(target) + '" title="Edit ' + escapeHtml(target) + '">' +
+          '<i data-lucide="pencil" aria-hidden="true"></i></button>' +
+        '<button type="button" data-delete-task data-task-id="' +
+          escapeHtml(task.id) + '" data-course-id="' +
+          escapeHtml(course.id) + '" data-assignment-id="' +
+          escapeHtml(assignment.id) + '" aria-label="Delete ' +
+          escapeHtml(target) + '" title="Delete ' + escapeHtml(target) + '">' +
+          '<i data-lucide="trash-2" aria-hidden="true"></i></button>' +
+      "</li>"
+    );
+  }).join("") + "</ul>";
+}
+
+function renderSelectedAssignmentDetail(course, assignment) {
+  const requirements = assignment.details?.requirements || [];
+  const deliverables = assignment.details?.deliverables || [];
+  const steps = assignment.details?.steps || assignment.tasks || [];
+  return (
+    '<article class="selected-assignment-detail" data-selected-assignment="true">' +
+      '<p class="assignment-kicker">' +
+        escapeHtml(course.code || course.name || "Course") + "</p>" +
+      "<h2>" + escapeHtml(assignment.title || "Untitled assignment") + "</h2>" +
+      "<dl>" +
+        "<div><dt>Due</dt><dd>" +
+          escapeHtml(formatAbsoluteDeadline(assignment)) + "</dd></div>" +
+        "<div><dt>Estimate</dt><dd>" +
+          escapeHtml(formatEstimate(assignment.estimateMinutes)) + "</dd></div>" +
+        "<div><dt>Next action</dt><dd>" +
+          escapeHtml(
+            assignment.nextAction || "Review the assignment requirements"
+          ) + "</dd></div>" +
+      "</dl>" +
+      '<section aria-labelledby="selectedLinksHeading">' +
+        '<h3 id="selectedLinksHeading">Source links</h3>' +
+        renderAssignmentDetailList(
+          assignment.links,
+          "No source links are recorded for this assignment."
+        ) +
+      "</section>" +
+      '<section aria-labelledby="selectedRequirementsHeading">' +
+        '<h3 id="selectedRequirementsHeading">Requirements</h3>' +
+        renderAssignmentDetailList(
+          requirements,
+          "No requirements are recorded for this assignment."
+        ) +
+      "</section>" +
+      '<section aria-labelledby="selectedStepsHeading">' +
+        '<h3>Deliverables</h3>' +
+        renderAssignmentDetailList(
+          deliverables,
+          "No deliverables are recorded for this assignment."
+        ) +
+        '<h3 id="selectedStepsHeading">Steps</h3>' +
+        renderAssignmentDetailList(
+          steps,
+          "No completion steps are recorded for this assignment."
+        ) +
+      "</section>" +
+      '<section aria-labelledby="selectedTasksHeading">' +
+        '<h3 id="selectedTasksHeading">Checklist</h3>' +
+        renderAssignmentTasks(course, assignment) +
+      "</section>" +
+      '<div class="dialog-actions">' +
+        '<button type="button" data-edit-assignment data-course-id="' +
+          escapeHtml(course.id) + '" data-assignment-id="' +
+          escapeHtml(assignment.id) + '">Edit assignment</button>' +
+        '<button type="button" data-delete-assignment data-course-id="' +
+          escapeHtml(course.id) + '" data-assignment-id="' +
+          escapeHtml(assignment.id) + '" aria-label="Delete assignment: ' +
+          escapeHtml(assignment.title || "Untitled assignment") + '" title="Delete assignment: ' +
+          escapeHtml(assignment.title || "Untitled assignment") + '">' +
+          '<i data-lucide="trash-2" aria-hidden="true"></i></button>' +
+      "</div>" +
+    "</article>"
+  );
+}
+
+function renderCourseTabs() {
+  const tabs = [
+    ["assignments", "Assignments"],
+    ["syllabus", "Syllabus"],
+    ["coach", "Coach"]
+  ];
+  elements.courseTabs.setAttribute("role", "tablist");
+  elements.courseTabs.innerHTML = tabs.map(([value, label]) => (
+    '<button id="course-tab-' + value + '" type="button" role="tab"' +
+      ' data-course-tab="' + value + '"' +
+      ' aria-controls="course-panel-' + value + '"' +
+      ' aria-selected="' + (state.activeCourseTab === value ? "true" : "false") +
+      '" tabindex="' + (state.activeCourseTab === value ? "0" : "-1") +
+      '">' + label + "</button>"
+  )).join("");
+}
+
+function renderCoursePanel(content) {
+  elements.courseWorkspace.innerHTML = [
+    "assignments",
+    "syllabus",
+    "coach"
+  ].map((tab) => (
+    '<section role="tabpanel" id="course-panel-' + tab + '"' +
+      ' aria-labelledby="course-tab-' + tab + '"' +
+      (tab === state.activeCourseTab ? "" : " hidden") + ">" +
+      (tab === state.activeCourseTab ? content : "") +
+    "</section>"
+  )).join("");
+}
+
+function assignmentFilterState(courseId) {
+  if (!state.assignmentFilters.has(courseId)) {
+    state.assignmentFilters.set(courseId, {
+      search: "",
+      status: "all"
     });
-    saveCourses();
-    renderTasks(course);
-    renderCourses();
-    renderTermPulse();
-    renderSourceCheck(course);
   }
-});
+  return state.assignmentFilters.get(courseId);
+}
 
-elements.courseImportForm.addEventListener("submit", (event) => {
+function assignmentMatchesSearch(assignment, query) {
+  const needle = String(query || "").trim().toLowerCase();
+  if (!needle) return true;
+  return [
+    assignment.title,
+    assignment.category,
+    assignment.dueDate,
+    assignment.points
+  ].some((value) => String(value || "").toLowerCase().includes(needle));
+}
+
+function assignmentStatusLabel(assignment) {
+  return {
+    active: "Active",
+    late: "Late",
+    submitted: "Submitted",
+    completed: "Completed",
+    graded: "Graded"
+  }[assignmentStatusValue(assignment)] || "Active";
+}
+
+function renderAssignmentList(course) {
+  const assignments = Array.isArray(course.assignments)
+    ? course.assignments
+    : [];
+  const filters = assignmentFilterState(course.id);
+  const filtered = assignments.filter((assignment) =>
+    assignmentMatchesSearch(assignment, filters.search) &&
+    (
+      filters.status === "all" ||
+      assignmentStatusValue(assignment) === filters.status
+    )
+  );
+  const statusOptions = [
+    ["all", "All statuses"],
+    ["active", "Active"],
+    ["late", "Late"],
+    ["submitted", "Submitted"],
+    ["completed", "Completed"],
+    ["graded", "Graded"]
+  ];
+  const emptyMessage = assignments.length === 0
+    ? "No assignments have been imported for this course."
+    : "No assignments match this search and status filter.";
+  const results = filtered.length === 0
+    ? '<p class="empty-state light assignment-results-empty">' +
+      emptyMessage + "</p>"
+    : '<div class="assignment-list">' + filtered.map((assignment) => (
+      '<button type="button" class="assignment-row"' +
+        ' data-course-id="' + escapeHtml(course.id) + '"' +
+        ' data-assignment-id="' + escapeHtml(assignment.id) + '">' +
+        "<span><strong>" + escapeHtml(assignment.title) + "</strong>" +
+          "<span>" + escapeHtml(
+            (assignment.category || "Assignment") + " | " +
+            assignmentStatusLabel(assignment)
+          ) + "</span></span>" +
+        "<span>" + escapeHtml(assignment.dueDate || "No date") + "</span>" +
+      "</button>"
+    )).join("") + "</div>";
+  return (
+    '<section aria-labelledby="courseAssignmentsHeading">' +
+      '<p class="assignment-kicker">' +
+        escapeHtml(course.code || "Course") + "</p>" +
+      '<h2 id="courseAssignmentsHeading">' +
+        escapeHtml(course.name || course.code || "Course") + "</h2>" +
+      '<div class="assignment-toolbar" role="search"' +
+        ' aria-label="Filter assignments in ' +
+        escapeHtml(course.code || course.name || "selected course") + '">' +
+        '<label for="assignmentSearch">Search assignments' +
+          '<input id="assignmentSearch" type="search"' +
+            ' data-assignment-search data-course-id="' +
+            escapeHtml(course.id) + '" value="' +
+            escapeHtml(filters.search) + '" aria-label="Search assignments in ' +
+            escapeHtml(course.code || course.name || "selected course") + '">' +
+        "</label>" +
+        '<label for="assignmentStatusFilter">Status' +
+          '<select id="assignmentStatusFilter"' +
+            ' data-assignment-status-filter data-course-id="' +
+            escapeHtml(course.id) + '" aria-label="Filter assignments by status">' +
+            statusOptions.map(([value, label]) => (
+              '<option value="' + value + '"' +
+                (filters.status === value ? " selected" : "") + ">" +
+                label + "</option>"
+            )).join("") +
+          "</select>" +
+        "</label>" +
+      "</div>" +
+      '<div class="assignment-results" aria-live="polite">' + results + "</div>" +
+    "</section>"
+  );
+}
+
+function handleAssignmentFilterChange(event) {
+  const search = event.target.closest("[data-assignment-search]");
+  const status = event.target.closest("[data-assignment-status-filter]");
+  const control = search || status;
+  if (!control) return false;
+  const course = workspace.courses.find(
+    (item) => item.id === control.dataset.courseId
+  );
+  if (!course) return false;
+  const filters = assignmentFilterState(course.id);
+  if (search) filters.search = String(search.value || "");
+  if (status) {
+    const nextStatus = String(status.value || "all");
+    filters.status = [
+      "all",
+      "active",
+      "late",
+      "submitted",
+      "completed",
+      "graded"
+    ].includes(nextStatus) ? nextStatus : "all";
+  }
+  const selectionStart = search?.selectionStart;
+  renderCoursesView();
+  refreshIcons();
+  const selector = search
+    ? "[data-assignment-search]"
+    : "[data-assignment-status-filter]";
+  const replacement = Array.from(
+    elements.courseWorkspace.querySelectorAll(selector)
+  ).find((item) => item.dataset.courseId === course.id);
+  replacement?.focus();
+  if (
+    search &&
+    Number.isInteger(selectionStart) &&
+    typeof replacement?.setSelectionRange === "function"
+  ) {
+    replacement.setSelectionRange(selectionStart, selectionStart);
+  }
+  return true;
+}
+
+function renderCoursePlanList(items, emptyMessage) {
+  const values = Array.isArray(items) ? items : [];
+  if (values.length === 0) {
+    return '<p class="empty-state light">' + escapeHtml(emptyMessage) + "</p>";
+  }
+  return "<ul>" + values.map((item) => {
+    const text = typeof item === "string"
+      ? item
+      : [item.label || item.week, item.date || item.topic || item.text]
+          .filter(Boolean)
+          .join(": ");
+    return "<li>" + escapeHtml(text) + "</li>";
+  }).join("") + "</ul>";
+}
+
+function renderSyllabus(course) {
+  const plan = course.coursePlan || {};
+  return (
+    '<section aria-labelledby="courseSyllabusHeading">' +
+      '<p class="assignment-kicker">' + escapeHtml(course.code || "Course") +
+      "</p>" +
+      '<h2 id="courseSyllabusHeading">Syllabus</h2>' +
+      "<h3>Course profile</h3>" +
+      "<p>" + escapeHtml([
+        plan.term,
+        plan.professor,
+        plan.section,
+        plan.modality
+      ].filter(Boolean).join(" | ") || "No course profile has been imported.") +
+      "</p>" +
+      "<h3>Deadlines</h3>" +
+      renderCoursePlanList(plan.deadlines, "No syllabus deadlines are recorded.") +
+      "<h3>Exams</h3>" +
+      renderCoursePlanList(plan.exams, "No exams are recorded.") +
+      "<h3>Policies</h3>" +
+      renderCoursePlanList(plan.policies, "No policies are recorded.") +
+      '<div class="dialog-actions">' +
+        '<button type="button" data-edit-course-plan data-course-id="' +
+          escapeHtml(course.id) + '" data-focus-key="course-plan-syllabus-' +
+          escapeHtml(course.id) + '">Edit course details</button>' +
+      "</div>" +
+    "</section>"
+  );
+}
+
+function renderCoach(course) {
+  const assignment = (course.assignments || []).find(
+    (item) => item.id === state.selectedAssignmentId
+  );
+  const coach = assignment
+    ? buildAssignmentCoach(course, assignment, workspace.preferences.language)
+    : buildCourseCoach(course, workspace.preferences.language);
+  const priorities = coach.nextSteps || coach.priorities || coach.studyFocus || [];
+  return (
+    '<section aria-labelledby="courseCoachHeading">' +
+      '<p class="assignment-kicker">' + escapeHtml(course.code || "Course") +
+      "</p>" +
+      '<h2 id="courseCoachHeading">Coach</h2>' +
+      "<p>" + escapeHtml(coach.summary || coach.title || "") + "</p>" +
+      renderAssignmentDetailList(
+        priorities,
+        "Import course material to receive deterministic planning guidance."
+      ) +
+    "</section>"
+  );
+}
+
+function renderCoursesView() {
+  const course = getActiveCourse();
+  elements.courseImportActions.innerHTML = "";
+  elements.courseTabs.innerHTML = "";
+
+  if (!course) {
+    elements.courseWorkspace.innerHTML =
+      '<section class="empty-state light">' +
+        "<h2>No courses yet</h2>" +
+        "<p>Import a syllabus or assignment to create your first course.</p>" +
+        '<button type="button" class="primary-action" data-action="open-import">' +
+          '<i data-lucide="upload" aria-hidden="true"></i>' +
+          "<span>Import course material</span>" +
+        "</button>" +
+      "</section>";
+    return;
+  }
+
+  elements.courseImportActions.innerHTML =
+    '<button type="button" class="primary-action" data-action="open-import"' +
+      ' data-course-id="' + escapeHtml(course.id) + '">' +
+      '<i data-lucide="upload" aria-hidden="true"></i>' +
+      "<span>Import into " +
+        escapeHtml(course.code || course.name || "selected course") +
+      "</span>" +
+    "</button>" +
+    '<button type="button" data-edit-course-plan data-course-id="' +
+      escapeHtml(course.id) + '" data-focus-key="course-plan-action-' +
+      escapeHtml(course.id) + '" aria-label="Edit course details"' +
+      ' title="Edit course details">' +
+      '<i data-lucide="pencil" aria-hidden="true"></i></button>' +
+    '<button type="button" data-delete-course data-course-id="' +
+      escapeHtml(course.id) + '" aria-label="Delete course: ' +
+      escapeHtml(course.code || course.name || "Untitled course") +
+      '" title="Delete course: ' +
+      escapeHtml(course.code || course.name || "Untitled course") + '">' +
+      '<i data-lucide="trash-2" aria-hidden="true"></i></button>';
+  renderCourseTabs();
+
+  const selectedAssignment = (course.assignments || []).find(
+    (assignment) => assignment.id === state.selectedAssignmentId
+  );
+  if (state.activeCourseTab === "assignments" && selectedAssignment) {
+    renderCoursePanel(
+      renderSelectedAssignmentDetail(course, selectedAssignment)
+    );
+    return;
+  }
+
+  if (state.activeCourseTab === "syllabus") {
+    renderCoursePanel(renderSyllabus(course));
+  } else if (state.activeCourseTab === "coach") {
+    renderCoursePanel(renderCoach(course));
+  } else {
+    renderCoursePanel(renderAssignmentList(course));
+  }
+}
+
+function activateCourseTab(value, shouldFocus = false) {
+  state.activeCourseTab = ["assignments", "syllabus", "coach"].includes(value)
+    ? value
+    : "assignments";
+  state.selectedAssignmentId = "";
+  renderCoursesView();
+  refreshIcons();
+  if (shouldFocus) {
+    const selected = Array.from(
+      elements.courseTabs.querySelectorAll("[data-course-tab]")
+    ).find((button) => button.dataset.courseTab === state.activeCourseTab);
+    selected?.focus();
+  }
+}
+
+function handleCourseTabKeydown(event) {
+  const current = event.target.closest("[data-course-tab]");
+  if (!current) return;
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    activateCourseTab(current.dataset.courseTab, true);
+    return;
+  }
+  const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+  if (!keys.includes(event.key)) return;
   event.preventDefault();
-  importCourseFromReviewedDraft();
-});
+  const tabs = Array.from(
+    elements.courseTabs.querySelectorAll("[data-course-tab]")
+  );
+  const currentIndex = tabs.findIndex(
+    (button) => button.dataset.courseTab === current.dataset.courseTab
+  );
+  if (currentIndex < 0) return;
+  let nextIndex = currentIndex;
+  if (event.key === "ArrowRight") {
+    nextIndex = (currentIndex + 1) % tabs.length;
+  } else if (event.key === "ArrowLeft") {
+    nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+  } else if (event.key === "Home") {
+    nextIndex = 0;
+  } else if (event.key === "End") {
+    nextIndex = tabs.length - 1;
+  }
+  activateCourseTab(tabs[nextIndex].dataset.courseTab, true);
+}
 
-elements.courseMaterial.addEventListener("input", refreshActionStates);
+function localDateKey(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return year + "-" + month + "-" + day;
+}
 
-elements.syllabusResult.addEventListener("submit", (event) => {
-  const form = event.target.closest("#directoryImportForm");
-  if (!form) return;
-  event.preventDefault();
-  const material = form.querySelector("#directoryMaterial")?.value || "";
-  importCourseFromMaterial(material, "", { bindToActiveCourse: true });
-});
+function monthCells(cursor) {
+  const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+  const start = new Date(first);
+  start.setDate(first.getDate() - first.getDay());
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    return date;
+  });
+}
 
-elements.syllabusResult.addEventListener("change", async (event) => {
-  const input = event.target.closest("#directoryFile");
-  if (!input) return;
-  const file = input.files?.[0];
-  if (!file) return;
-  const fileKind = getCourseImportFileKind(file);
-  showStatus(`Selected ${file.name} for ${getActiveCourse()?.code || "this course"}. Reading it now.`, "info");
+function currentCalendarFilter() {
+  return {
+    courseId: elements.calendarCourseFilter.value ||
+      workspace.preferences.calendarCourseFilter || "all",
+    type: elements.calendarTypeFilter.value || state.calendarTypeFilter || "all"
+  };
+}
 
+function renderAgendaItems(items, emptyMessage) {
+  if (items.length === 0) {
+    return '<p class="empty-state light">' + escapeHtml(emptyMessage) + "</p>";
+  }
+  return "<ul>" + items.map((item) => (
+    "<li><strong>" + escapeHtml(item.courseCode || "Course") + "</strong> " +
+      escapeHtml(item.title || "Untitled item") +
+      ' <span class="calendar-item-type">' + escapeHtml(item.type) + "</span></li>"
+  )).join("") + "</ul>";
+}
+
+function renderCalendarCourseOptions() {
+  const selected = currentCalendarFilter().courseId;
+  elements.calendarCourseFilter.innerHTML =
+    '<option value="all">All courses</option>' +
+    workspace.courses.map((course) => (
+      '<option value="' + escapeHtml(course.id) + '">' +
+        escapeHtml(course.code || course.name || "Course") +
+      "</option>"
+    )).join("");
+  elements.calendarCourseFilter.value = workspace.courses.some(
+    (course) => course.id === selected
+  ) ? selected : "all";
+}
+
+function renderCalendar() {
+  renderCalendarCourseOptions();
+  const items = buildCalendarItems(workspace, currentCalendarFilter());
+  const byDate = new Map();
+  const undated = [];
+  items.forEach((item) => {
+    const key = localDateKey(item.dueAt);
+    if (!key) {
+      undated.push(item);
+      return;
+    }
+    byDate.set(key, [...(byDate.get(key) || []), item]);
+  });
+
+  if (!state.selectedCalendarDate) {
+    state.selectedCalendarDate = localDateKey(new Date());
+  }
+  const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    .map((label) => '<span class="calendar-weekday" aria-hidden="true">' +
+      label + "</span>")
+    .join("");
+  elements.calendarGrid.innerHTML = weekdayLabels +
+    monthCells(state.calendarCursor).map((date) => {
+    const key = localDateKey(date);
+    const events = byDate.get(key) || [];
+    const selected = key === state.selectedCalendarDate;
+    return (
+      '<button type="button" class="calendar-day" data-calendar-date="' + key +
+        '" aria-label="' + escapeHtml(date.toLocaleDateString()) +
+        ", " + events.length + " item" + (events.length === 1 ? "" : "s") +
+        '" aria-pressed="' + (selected ? "true" : "false") + '">' +
+        '<span class="calendar-day-number">' + date.getDate() + "</span>" +
+        '<span class="calendar-event-count">' + events.length + "</span>" +
+        events.slice(0, 2).map((item) => (
+          '<span class="calendar-event-label">' +
+            escapeHtml(item.courseCode + " " + item.title) + "</span>"
+        )).join("") +
+      "</button>"
+    );
+    }).join("");
+  elements.calendarAgenda.innerHTML = renderAgendaItems(
+    byDate.get(state.selectedCalendarDate) || [],
+    "No dated items match this day."
+  );
+  elements.undatedItems.innerHTML = renderAgendaItems(
+    undated,
+    "No undated items match these filters."
+  );
+  elements.calendarMonthLabel.textContent = state.calendarCursor
+    .toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  refreshIcons();
+}
+
+function renderDataView() {
+  const assignmentCount = workspace.courses.reduce(
+    (total, course) => total + (course.assignments || []).length,
+    0
+  );
+  elements.dataSummary.textContent = workspace.courses.length + " courses, " +
+    assignmentCount + " assignments, schema " + workspace.schemaVersion + ".";
+  elements.lastBackup.textContent = workspace.metadata.lastBackupAt
+    ? "Last backup: " + new Date(workspace.metadata.lastBackupAt).toLocaleString()
+    : "No backup exported yet.";
+  elements.restoreBackup.disabled = !pendingBackup;
+}
+
+function renderData() {
+  renderDataView();
+}
+
+function downloadTextFile(name, type, text) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function downloadCalendar() {
+  downloadTextFile(
+    "classpilot-calendar.ics",
+    "text/calendar;charset=utf-8",
+    createIcsCalendar(buildCalendarItems(workspace, currentCalendarFilter()))
+  );
+  showStatus("Calendar download started.", "success");
+  return true;
+}
+
+function downloadBackup() {
+  const now = new Date();
+  const previousWorkspace = workspace;
+  const nextWorkspace = normalizeWorkspace(workspace, now);
+  nextWorkspace.metadata.lastBackupAt = now.toISOString();
+  const text = serializeWorkspaceBackup(nextWorkspace, now);
+  workspace = nextWorkspace;
+  const timestampSaved = saveWorkspace();
+  if (timestampSaved) {
+    invalidateUndo();
+    renderAll();
+  } else {
+    workspace = previousWorkspace;
+  }
+  downloadTextFile("classpilot-backup.json", "application/json;charset=utf-8", text);
+  showStatus(
+    timestampSaved
+      ? "Backup download started."
+      : "Backup download started, but the last backup time could not be saved.",
+    timestampSaved ? "success" : "warn"
+  );
+  return true;
+}
+
+function resetBackupPreview() {
+  pendingBackup = undefined;
+  elements.backupPreview.textContent = "Choose a backup to validate it before restoring.";
+  elements.restoreBackup.disabled = true;
+}
+
+function clearBackupPreview() {
+  backupPreviewOperation += 1;
+  resetBackupPreview();
+}
+
+async function previewBackup(file) {
+  const operation = ++backupPreviewOperation;
+  resetBackupPreview();
+  if (!file) throw new Error("Choose a backup file to restore.");
+  if (Number(file.size) > 25 * 1024 * 1024) {
+    throw new Error("Backup files must be 25 MB or smaller.");
+  }
+  const parsed = parseWorkspaceBackup(await file.text());
+  if (operation !== backupPreviewOperation) return false;
+  pendingBackup = normalizeWorkspace(parsed);
+  const assignmentCount = pendingBackup.courses.reduce(
+    (total, course) => total + (course.assignments || []).length,
+    0
+  );
+  elements.backupPreview.textContent = pendingBackup.courses.length + " courses and " +
+    assignmentCount + " assignments ready to restore.";
+  elements.restoreBackup.disabled = false;
+  return true;
+}
+
+function restoreBackup() {
+  if (!pendingBackup) {
+    showStatus("Choose and validate a backup before restoring.", "warn");
+    return false;
+  }
+  const nextWorkspace = normalizeRestoredWorkspace(pendingBackup);
+  if (!commitWorkspace(nextWorkspace, {
+    allowStorageRecovery: true,
+    render: false
+  })) {
+    return false;
+  }
+  state.assignmentFilters.clear();
+  state.activeView = workspace.preferences.activeView;
+  state.activeCourseTab = "assignments";
+  state.selectedAssignmentId = "";
+  state.calendarTypeFilter = "all";
+  state.selectedCalendarDate = "";
+  elements.calendarCourseFilter.value =
+    workspace.preferences.calendarCourseFilter;
+  elements.calendarTypeFilter.value = "all";
+  clearBackupPreview();
+  elements.importBackup.value = "";
+  renderAll();
+  window.history.replaceState(null, "", "#" + state.activeView);
+  showStatus("Backup restored.", "success");
+  return true;
+}
+
+function normalizeRestoredWorkspace(value) {
+  const next = normalizeWorkspace(value);
+  const courseIds = new Set(next.courses.map((course) => course.id));
+  next.preferences.activeView = normalizedView(
+    next.preferences.activeView
+  );
+  next.preferences.activeCourseId = courseIds.has(
+    next.preferences.activeCourseId
+  )
+    ? next.preferences.activeCourseId
+    : next.courses[0]?.id || "";
+  next.preferences.calendarCourseFilter =
+    next.preferences.calendarCourseFilter === "all" ||
+    courseIds.has(next.preferences.calendarCourseFilter)
+      ? next.preferences.calendarCourseFilter
+      : "all";
+  return next;
+}
+
+async function handleBackupFileChange(event) {
+  const operation = backupPreviewOperation + 1;
+  const file = event.currentTarget.files?.[0];
   try {
-    if (fileKind === "image") {
-      await importScreenshotFile(file, { bindToActiveCourse: true });
-      return;
-    }
+    const ready = await previewBackup(file);
+    if (!ready || operation !== backupPreviewOperation) return;
+    showStatus("Backup validated. Review the preview, then restore it.", "success");
+  } catch (error) {
+    if (operation !== backupPreviewOperation) return;
+    resetBackupPreview();
+    showStatus("Backup could not be prepared: " + error.message, "warn");
+  }
+}
 
-    if (fileKind !== "text") {
-      showStatus("Unsupported file. Upload a .txt, .md, .csv, .png, .jpg, or .webp file.", "warn");
-      return;
-    }
+function requestClearWorkspace(opener) {
+  clearWorkspaceConfirmationPending = true;
+  elements.confirmationDialog.innerHTML =
+    '<h2 id="confirmationDialogTitle">Clear workspace?</h2>' +
+    "<p>Export a backup before clearing. This replaces the current version 7 workspace in this browser.</p>" +
+    '<div class="dialog-actions">' +
+      '<button type="button" data-dialog-close>Cancel</button>' +
+      '<button type="button" data-action="confirm-clear-workspace">Clear workspace</button>' +
+    "</div>";
+  showDialog(elements.confirmationDialog, opener);
+  return true;
+}
 
+function clearWorkspaceAfterConfirmation() {
+  if (!clearWorkspaceConfirmationPending) return false;
+  const nextWorkspace = createEmptyWorkspace(new Date());
+  if (!commitWorkspace(nextWorkspace, { allowStorageRecovery: true })) {
+    return false;
+  }
+  state.assignmentFilters.clear();
+  clearWorkspaceConfirmationPending = false;
+  state.activeCourseTab = "assignments";
+  state.selectedAssignmentId = "";
+  clearBackupPreview();
+  elements.importBackup.value = "";
+  elements.confirmationDialog.close();
+  renderAll();
+  showStatus("Workspace cleared. Your version 6 recovery data was left untouched.", "success");
+  return true;
+}
+
+function renderActiveView() {
+  switch (state.activeView) {
+    case "courses":
+      renderCoursesView();
+      break;
+    case "calendar":
+      renderCalendar();
+      break;
+    case "data":
+      renderData();
+      break;
+    default:
+      renderToday();
+  }
+}
+
+function updateViewHeader() {
+  const headers = {
+    today: ["Today", "Your next move"],
+    courses: ["Courses", "Course workspace"],
+    calendar: ["Calendar", "Deadlines at a glance"],
+    data: ["Data", "Protect your workspace"]
+  };
+  const [eyebrow, title] = headers[state.activeView];
+  elements.viewEyebrow.textContent = eyebrow;
+  elements.viewTitle.textContent = title;
+  elements.headerImportButton.hidden =
+    state.activeView === "calendar" || state.activeView === "data";
+}
+
+function navigateToView(view, options = {}) {
+  const nextView = normalizedView(view);
+  if (options.persist !== false) {
+    if (!persistWorkspacePreferences({ activeView: nextView })) return false;
+  } else {
+    workspace.preferences.activeView = nextView;
+  }
+  state.activeView = nextView;
+
+  document.querySelectorAll("[data-view-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.viewPanel !== state.activeView;
+  });
+  document.querySelectorAll("[data-view]").forEach((button) => {
+    const selected = button.dataset.view === state.activeView;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-current", selected ? "page" : "false");
+  });
+
+  updateViewHeader();
+  renderActiveView();
+
+  if (options.updateHash !== false) {
+    const nextHash = "#" + state.activeView;
+    if (window.location.hash !== nextHash) {
+      window.history.pushState(null, "", nextHash);
+    }
+  }
+  if (options.focus !== false) elements.mainWorkspace.focus();
+  refreshIcons();
+  return true;
+}
+
+function renderAll() {
+  renderNavigation();
+  renderCourseRail();
+  renderToday();
+  renderCoursesView();
+  renderCalendar();
+  renderData();
+  navigateToView(state.activeView, {
+    focus: false,
+    persist: false,
+    updateHash: false
+  });
+  refreshIcons();
+}
+
+function assignmentStatusValue(assignment) {
+  const status = assignment.status;
+  const statusRecord = status && typeof status === "object" ? status : {};
+  const statusValue = String(
+    typeof status === "string"
+      ? status
+      : statusRecord.value || statusRecord.status || ""
+  ).trim().toLowerCase();
+  const category = String(assignment.category || "").trim().toLowerCase();
+  if (
+    statusRecord.completed ||
+    ["complete", "completed", "feedback"].includes(statusValue) ||
+    ["complete", "completed", "feedback"].includes(category)
+  ) {
+    return "completed";
+  }
+  if (
+    statusValue === "graded" ||
+    category === "graded" ||
+    String(statusRecord.grading || "").trim().toLowerCase() === "graded" ||
+    hasMeaningfulScore(statusRecord.score)
+  ) {
+    return "graded";
+  }
+  if (
+    statusRecord.submittedAt ||
+    statusValue === "submitted" ||
+    category === "submitted"
+  ) {
+    return "submitted";
+  }
+  if (statusRecord.late || statusValue === "late" || category === "late") {
+    return "late";
+  }
+  return "active";
+}
+
+function clearGradingEvidence(status = {}) {
+  const next = { ...status };
+  delete next.score;
+  delete next.gradedAt;
+  if (
+    String(next.grading || "").trim().toLowerCase() === "graded"
+  ) {
+    delete next.grading;
+  }
+  return next;
+}
+
+function openAssignmentEditor(courseId, assignmentId, opener) {
+  const assignment = findAssignment(courseId, assignmentId);
+  if (!assignment) return false;
+  const form = elements.assignmentForm;
+  editorControl(form, "courseId").value = courseId;
+  editorControl(form, "assignmentId").value = assignmentId;
+  editorControl(form, "assignmentTitle").value = assignment.title || "";
+  editorControl(form, "assignmentDueDate").value = assignment.dueDate || "";
+  editorControl(form, "assignmentPoints").value = assignment.points || "";
+  editorControl(form, "assignmentStatus").value = assignmentStatusValue(assignment);
+  editorControl(form, "assignmentEstimate").value = assignment.estimateMinutes || "";
+  editorControl(form, "assignmentRequirements").value =
+    (assignment.details?.requirements || []).map(assignmentDetailItemText).join("\n");
+  editorControl(form, "assignmentDeliverables").value =
+    (assignment.details?.deliverables || []).map(assignmentDetailItemText).join("\n");
+  editorControl(form, "assignmentSteps").value =
+    (assignment.details?.steps || []).map(assignmentDetailItemText).join("\n");
+  showDialog(elements.assignmentDialog, opener);
+  editorControl(form, "assignmentTitle").focus();
+  return true;
+}
+
+function submitAssignmentEdit(form = elements.assignmentForm) {
+  const courseId = editorValue(form, "courseId");
+  const assignmentId = editorValue(form, "assignmentId");
+  const current = findAssignment(courseId, assignmentId);
+  if (!current) return false;
+  const dueDateInput = editorValue(form, "assignmentDueDate").trim();
+  if (dueDateInput && !parseDueAt(dueDateInput)) {
+    showStatus(
+      "Enter a valid due date, such as Feb 29, 2024, or leave it blank.",
+      "warn"
+    );
+    editorControl(form, "assignmentDueDate").focus();
+    return false;
+  }
+  const structuredDueDate = parseStructuredEnglishDate(
+    dueDateInput,
+    { now: new Date() }
+  );
+  const dueDate = structuredDueDate.matched && structuredDueDate.valid
+    ? structuredDueDate.formatted
+    : dueDateInput;
+  const statusValue = editorValue(form, "assignmentStatus");
+  const currentStatus = current.status && typeof current.status === "object"
+    ? current.status
+    : {};
+  const graded = statusValue === "graded";
+  let status = {
+    ...currentStatus,
+    value: statusValue,
+    late: statusValue === "late" || (graded && Boolean(currentStatus.late)),
+    submittedAt: statusValue === "submitted"
+      ? currentStatus.submittedAt || new Date().toLocaleString()
+      : graded
+        ? currentStatus.submittedAt || ""
+        : "",
+    completed: statusValue === "completed",
+    grading: graded
+      ? "Graded"
+      : String(currentStatus.grading || "").trim().toLowerCase() === "graded"
+        ? ""
+        : currentStatus.grading || ""
+  };
+  if (!graded) status = clearGradingEvidence(status);
+  const category = {
+    active: "To submit",
+    late: "Late",
+    submitted: "Submitted",
+    completed: "Completed",
+    graded: "Graded"
+  }[statusValue] || current.category;
+  const nextWorkspace = updateAssignment(workspace, courseId, assignmentId, {
+    title: editorValue(form, "assignmentTitle").trim(),
+    dueDate,
+    points: editorValue(form, "assignmentPoints").trim(),
+    estimateMinutes: Number(editorValue(form, "assignmentEstimate")) || 30,
+    category,
+    status,
+    details: {
+      ...(current.details || {}),
+      requirements: splitEditableLines(editorValue(form, "assignmentRequirements")),
+      deliverables: splitEditableLines(editorValue(form, "assignmentDeliverables")),
+      steps: splitEditableLines(editorValue(form, "assignmentSteps"))
+    }
+  });
+  if (!commitWorkspace(nextWorkspace)) return false;
+  elements.assignmentDialog.close();
+  showStatus("Saved " + (editorValue(form, "assignmentTitle").trim() || "assignment") + ".", "success");
+  return true;
+}
+
+function openTaskEditor(courseId, assignmentId, taskId, opener) {
+  const assignment = findAssignment(courseId, assignmentId);
+  const task = assignment?.tasks?.find((item) => item.id === taskId);
+  if (!task) return false;
+  const form = elements.taskForm;
+  editorControl(form, "courseId").value = courseId;
+  editorControl(form, "assignmentId").value = assignmentId;
+  editorControl(form, "taskId").value = taskId;
+  editorControl(form, "taskTitle").value = task.title || "";
+  showDialog(elements.taskDialog, opener);
+  editorControl(form, "taskTitle").focus();
+  return true;
+}
+
+function submitTaskEdit(form = elements.taskForm) {
+  const courseId = editorValue(form, "courseId");
+  const assignmentId = editorValue(form, "assignmentId");
+  const taskId = editorValue(form, "taskId");
+  const assignment = findAssignment(courseId, assignmentId);
+  const task = assignment?.tasks?.find((item) => item.id === taskId);
+  if (!assignment || !task) return false;
+  const title = editorValue(form, "taskTitle").trim();
+  if (!title) {
+    showStatus("Enter a task title before saving.", "warn");
+    editorControl(form, "taskTitle").focus();
+    return false;
+  }
+  const nextWorkspace = updateAssignment(workspace, courseId, assignmentId, {
+    tasks: assignment.tasks.map((item) =>
+      item.id === taskId ? { ...item, title } : item
+    )
+  });
+  if (!commitWorkspace(nextWorkspace)) return false;
+  elements.taskDialog.close();
+  showStatus("Saved task " + title + ".", "success");
+  return true;
+}
+
+function openCoursePlanEditor(courseId, opener) {
+  const course = workspace.courses.find((item) => item.id === courseId);
+  if (!course) return false;
+  const plan = course.coursePlan || {};
+  const form = elements.coursePlanForm;
+  editorControl(form, "courseId").value = courseId;
+  editorControl(form, "courseCode").value = course.code || "";
+  editorControl(form, "courseName").value = course.name || "";
+  editorControl(form, "coursePlanTerm").value = plan.term || "";
+  editorControl(form, "coursePlanProfessor").value = plan.professor || "";
+  editorControl(form, "coursePlanMeeting").value = plan.meetingLocation || "";
+  editorControl(form, "coursePlanOfficeHours").value = plan.officeHours || "";
+  editorControl(form, "coursePlanEmail").value = plan.email || "";
+  showDialog(elements.coursePlanDialog, opener);
+  editorControl(form, "courseCode").focus();
+  return true;
+}
+
+function normalizeCourseCode(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().toUpperCase();
+}
+
+function normalizeCourseName(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function submitCoursePlanEdit(form = elements.coursePlanForm) {
+  const courseId = editorValue(form, "courseId");
+  const course = workspace.courses.find((item) => item.id === courseId);
+  if (!course) return false;
+  const code = editorValue(form, "courseCode").replace(/\s+/g, " ").trim();
+  const name = editorValue(form, "courseName").replace(/\s+/g, " ").trim();
+  if (!code || !name) {
+    const missing = !code
+      ? editorControl(form, "courseCode")
+      : editorControl(form, "courseName");
+    showStatus("Enter both a course code and course name before saving.", "warn");
+    missing.focus();
+    return false;
+  }
+  const otherCourses = workspace.courses.filter((item) => item.id !== courseId);
+  const codeConflict = otherCourses.find((item) =>
+    normalizeCourseCode(item.code) === normalizeCourseCode(code)
+  );
+  if (codeConflict) {
+    showStatus(
+      "Course code " + code + " already belongs to " +
+      (codeConflict.code || codeConflict.name || "another course") +
+      ". Enter a unique course code.",
+      "warn"
+    );
+    editorControl(form, "courseCode").focus();
+    return false;
+  }
+  const nameConflict = otherCourses.find((item) =>
+    normalizeCourseName(item.name) === normalizeCourseName(name)
+  );
+  if (nameConflict) {
+    showStatus(
+      "Course name " + name + " already belongs to " +
+      (nameConflict.code || nameConflict.name || "another course") +
+      ". Enter a unique course name.",
+      "warn"
+    );
+    editorControl(form, "courseName").focus();
+    return false;
+  }
+  const nextWorkspace = updateCourse(workspace, courseId, {
+    code,
+    name,
+    coursePlan: {
+      ...(course.coursePlan || {}),
+      term: editorValue(form, "coursePlanTerm").trim(),
+      professor: editorValue(form, "coursePlanProfessor").trim(),
+      meetingLocation: editorValue(form, "coursePlanMeeting").trim(),
+      officeHours: editorValue(form, "coursePlanOfficeHours").trim(),
+      email: editorValue(form, "coursePlanEmail").trim()
+    }
+  });
+  if (!commitWorkspace(nextWorkspace)) return false;
+  elements.coursePlanDialog.close();
+  showStatus("Saved course details for " + code + ".", "success");
+  return true;
+}
+
+function invalidateUndo() {
+  clearTimeout(undoTimer);
+  undoTimer = undefined;
+  undoState = undefined;
+  elements.undoToast.hidden = true;
+}
+
+function showUndo(message, snapshot) {
+  invalidateUndo();
+  undoState = { snapshot };
+  elements.undoToast.innerHTML =
+    "<span>" + escapeHtml(message) +
+    '</span><button type="button" data-undo>Undo</button>';
+  elements.undoToast.hidden = false;
+  undoTimer = setTimeout(() => {
+    invalidateUndo();
+  }, 10000);
+}
+
+function deleteAssignmentWithUndo(courseId, assignmentId) {
+  const assignment = findAssignment(courseId, assignmentId);
+  if (!assignment) return false;
+  const snapshot = createWorkspaceSnapshot(workspace);
+  const nextWorkspace = removeAssignment(workspace, courseId, assignmentId);
+  if (!commitWorkspace(nextWorkspace, { invalidateUndo: false })) return false;
+  state.selectedAssignmentId = "";
+  showUndo("Assignment " + (assignment.title || "Untitled assignment") + " deleted.", snapshot);
+  return true;
+}
+
+function deleteCourseWithUndo(courseId) {
+  const course = workspace.courses.find((item) => item.id === courseId);
+  if (!course) return false;
+  const snapshot = createWorkspaceSnapshot(workspace);
+  const nextWorkspace = removeWorkspaceCourse(workspace, courseId);
+  if (!commitWorkspace(nextWorkspace, { invalidateUndo: false })) return false;
+  state.selectedAssignmentId = "";
+  showUndo("Course " + (course.code || course.name || "Untitled course") + " deleted.", snapshot);
+  return true;
+}
+
+function deleteTaskWithUndo(courseId, assignmentId, taskId) {
+  const assignment = findAssignment(courseId, assignmentId);
+  const task = assignment?.tasks?.find((item) => item.id === taskId);
+  if (!assignment || !task) return false;
+  const snapshot = createWorkspaceSnapshot(workspace);
+  const nextWorkspace = updateAssignment(workspace, courseId, assignmentId, {
+    tasks: assignment.tasks.filter((item) => item.id !== taskId)
+  });
+  if (!commitWorkspace(nextWorkspace, { invalidateUndo: false })) return false;
+  showUndo("Task " + (task.title || "Untitled task") + " deleted.", snapshot);
+  return true;
+}
+
+function setTaskCompletion(courseId, assignmentId, taskId, done) {
+  const assignment = findAssignment(courseId, assignmentId);
+  if (!assignment?.tasks?.some((item) => item.id === taskId)) return false;
+  const nextWorkspace = updateAssignment(workspace, courseId, assignmentId, {
+    tasks: assignment.tasks.map((task) => task.id === taskId
+      ? { ...task, done: Boolean(done) }
+      : task)
+  });
+  return commitWorkspace(nextWorkspace);
+}
+
+function restoreUndo() {
+  if (!undoState) return false;
+  const nextWorkspace = restoreWorkspaceSnapshot(undoState.snapshot);
+  if (!commitWorkspace(nextWorkspace, { invalidateUndo: false })) return false;
+  invalidateUndo();
+  showStatus("Deletion undone.", "success");
+  return true;
+}
+
+function importControl(name) {
+  return elements.importForm.elements?.namedItem(name) ||
+    elements.importForm.elements?.[name] ||
+    null;
+}
+
+function resetImportProgress() {
+  const labels = {
+    reading: "Reading file",
+    extracting: "Extracting information",
+    checking: "Checking required fields",
+    saved: "Saved or needs review"
+  };
+  elements.importProgress.querySelectorAll("[data-import-stage]")
+    .forEach((item) => {
+      item.classList.toggle("is-active", false);
+      item.classList.toggle("is-complete", false);
+      item.setAttribute("aria-current", "false");
+      item.textContent = labels[item.dataset.importStage];
+    });
+  elements.importProgressDetail.textContent = "";
+}
+
+function renderImportProgress(progress = {}) {
+  const update = typeof progress === "string"
+    ? { stage: progress }
+    : progress;
+  const rawStage = update.stage || "reading";
+  const stage = rawStage === "ocr" ? "extracting" : rawStage;
+  const stageOrder = ["reading", "extracting", "checking", "saved"];
+  const activeIndex = Math.max(0, stageOrder.indexOf(stage));
+  elements.importProgress.querySelectorAll("[data-import-stage]")
+    .forEach((item) => {
+      const index = stageOrder.indexOf(item.dataset.importStage);
+      item.classList.toggle("is-complete", index < activeIndex);
+      item.classList.toggle("is-active", index === activeIndex);
+      item.setAttribute("aria-current", index === activeIndex ? "step" : "false");
+    });
+
+  let detail = "";
+  if (rawStage === "reading") {
+    detail = "Reading " + (update.fileName || "pasted text") +
+      (update.kind ? " (" + update.kind + ")" : "") + ".";
+  } else if (rawStage === "ocr") {
+    const percent = Math.round(Math.max(0, Math.min(1, Number(update.progress) || 0)) * 100);
+    const page = update.pageNumber
+      ? " page " + update.pageNumber +
+        (update.pageCount ? " of " + update.pageCount : "")
+      : "";
+    detail = "Running local OCR" + page + ": " + percent + "%.";
+  } else if (rawStage === "extracting") {
+    detail = update.pageNumber
+      ? "Extracting page " + update.pageNumber + " of " + update.pageCount + "."
+      : "Extracting course and assignment details.";
+  } else if (rawStage === "checking") {
+    detail = "Checking confidence, warnings, and required fields.";
+  } else if (rawStage === "saved") {
+    detail = update.outcome === "review"
+      ? "Import needs review before it can be saved."
+      : "Saved to " + (update.destination || "the course workspace") + ".";
+  }
+  elements.importProgressDetail.textContent = detail;
+}
+
+function setImportBusy(isBusy) {
+  elements.analyzeImport.disabled = Boolean(isBusy);
+  elements.saveImportReview.disabled = Boolean(isBusy);
+  elements.importFile.disabled = Boolean(isBusy);
+  elements.importText.disabled = Boolean(isBusy);
+}
+
+function yieldImportStage() {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    } else {
+      setTimeout(() => setTimeout(resolve, 0), 0);
+    }
+  });
+}
+
+function assertCurrentImport(controller) {
+  if (
+    controller.signal.aborted ||
+    importController !== controller
+  ) {
+    throw createImportAbortError();
+  }
+}
+
+function createImportAbortError() {
+  if (typeof DOMException === "function") {
+    return new DOMException("Import cancelled.", "AbortError");
+  }
+  const error = new Error("Import cancelled.");
+  error.name = "AbortError";
+  return error;
+}
+
+function recognizeImage(image, onProgress) {
+  if (typeof window.Tesseract?.createWorker !== "function") {
+    throw new Error("Local image OCR is unavailable.");
+  }
+  const previousOperation = activeOcrOperation;
+  previousOperation?.cancel();
+  let worker;
+  let cancelled = false;
+  let rejectCancellation;
+  let terminationPromise;
+  let operation;
+  const cancellation = new Promise((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
+  cancellation.catch(() => {});
+  const terminateWorker = () => {
+    if (!worker) return Promise.resolve();
+    if (!terminationPromise) {
+      terminationPromise = Promise.resolve()
+        .then(() => worker.terminate?.())
+        .catch(() => {});
+    }
+    return terminationPromise;
+  };
+  const run = (async () => {
     try {
-      setImportBusy(true);
-      const text = await readFileAsText(file);
-      const material = input.closest("#directoryImportForm")?.querySelector("#directoryMaterial");
-      if (material) material.value = text;
-      showStatus(`Read ${file.name}. Saving it inside ${getActiveCourse()?.code || "the selected course"}.`, "info");
-      importCourseFromMaterial(text, file.name, { bindToActiveCourse: true });
+      if (previousOperation?.cleanup) {
+        await previousOperation.cleanup;
+      }
+      if (cancelled) throw createImportAbortError();
+      worker = await window.Tesseract.createWorker(
+        "eng",
+        window.Tesseract.OEM?.LSTM_ONLY ?? 1,
+        {
+          workerPath: "./vendor/tesseract/worker.min.js",
+          corePath: "./vendor/tesseract/tesseract-core.wasm.js",
+          langPath: "./vendor/tesseract",
+          logger(message) {
+            if (
+              message.status === "recognizing text" &&
+              Number.isFinite(message.progress)
+            ) {
+              onProgress?.(message.progress);
+            }
+          }
+        }
+      );
+      if (cancelled) throw createImportAbortError();
+      const result = await Promise.race([
+        Promise.resolve(worker.recognize(image)),
+        cancellation
+      ]);
+      if (cancelled) throw createImportAbortError();
+      return result?.data?.text || "";
     } catch (error) {
-      showStatus(error.message, "warn");
+      if (cancelled) throw createImportAbortError();
+      throw error;
     } finally {
+      await terminateWorker();
+      if (activeOcrOperation === operation) {
+        activeOcrOperation = undefined;
+      }
+    }
+  })();
+  operation = Promise.race([run, cancellation]);
+  const cleanup = run.then(
+    () => undefined,
+    () => undefined
+  );
+  const cancel = () => {
+    if (!cancelled) {
+      cancelled = true;
+      rejectCancellation(createImportAbortError());
+    }
+    void terminateWorker();
+    return cleanup;
+  };
+  operation.cancel = cancel;
+  operation.terminate = cancel;
+  operation.cleanup = cleanup;
+  activeOcrOperation = operation;
+  return operation;
+}
+
+function openImportDialog(courseId = "", opener) {
+  importController?.abort();
+  importController = undefined;
+  const course = workspace.courses.find((item) => item.id === courseId);
+  if (courseId && !course) {
+    importCourseId = "";
+    importControl("courseId").value = "";
+    elements.importDialog.close?.();
+    showStatus(
+      "The selected course is no longer available. Open Courses and choose the course again.",
+      "warn"
+    );
+    return false;
+  }
+  pendingImportDraft = undefined;
+  importCourseId = course?.id || "";
+  importControl("courseId").value = importCourseId;
+  elements.importFile.value = "";
+  elements.importText.value = "";
+  elements.importReview.hidden = true;
+  elements.saveImportReview.hidden = true;
+  elements.analyzeImport.hidden = false;
+  setImportBusy(false);
+  resetImportProgress();
+  if (elements.importDialogTitle) {
+    elements.importDialogTitle.textContent = course
+      ? "Import into " + (course.code || course.name || "selected course")
+      : "Import course material";
+  }
+  showDialog(elements.importDialog, opener);
+  elements.importFile.focus();
+  return true;
+}
+
+function importStatusValue(status = {}) {
+  if (
+    status.grading === "Graded" ||
+    hasMeaningfulScore(status.score)
+  ) return "graded";
+  if (status.late) return "late";
+  if (status.submittedAt) return "submitted";
+  return "assigned";
+}
+
+const REVIEW_FIELDS = {
+  courseCode: {
+    control: "reviewCourseCode",
+    id: "review-course-code-details",
+    label: "Course code"
+  },
+  courseName: {
+    control: "reviewCourseName",
+    id: "review-course-name-details",
+    label: "Course name"
+  },
+  materialType: {
+    control: "reviewMaterialType",
+    id: "review-material-type-details",
+    label: "Material type"
+  },
+  assignment: {
+    control: "reviewAssignment",
+    id: "review-assignment-details",
+    label: "Assignment title"
+  },
+  dueDate: {
+    control: "reviewDueDate",
+    id: "review-due-date-details",
+    label: "Due date"
+  },
+  points: {
+    control: "reviewPoints",
+    id: "review-points-details",
+    label: "Points"
+  },
+  status: {
+    control: "reviewStatus",
+    id: "review-status-details",
+    label: "Status"
+  },
+  links: {
+    control: "reviewLinks",
+    id: "review-links-details",
+    label: "Links"
+  },
+  requirements: {
+    control: "reviewRequirements",
+    id: "review-requirements-details",
+    label: "Requirements"
+  },
+  deliverables: {
+    control: "reviewDeliverables",
+    id: "review-deliverables-details",
+    label: "Deliverables"
+  },
+  tasks: {
+    control: "reviewTasks",
+    id: "review-tasks-details",
+    label: "Tasks"
+  },
+  steps: {
+    control: "reviewSteps",
+    id: "review-steps-details",
+    label: "Steps"
+  }
+};
+
+function reviewFieldForText(value) {
+  const text = String(value || "").toLowerCase();
+  if (text.includes("course code")) return "courseCode";
+  if (
+    text === "course" ||
+    text.includes("course name") ||
+    text.includes("course identity")
+  ) {
+    return "courseName";
+  }
+  if (text.includes("due") || text.includes("date")) return "dueDate";
+  if (text.includes("assignment") || text.includes("title")) return "assignment";
+  if (text.includes("point")) return "points";
+  if (text.includes("submitted") || text.includes("status") || text.includes("score")) {
+    return "status";
+  }
+  if (text.includes("link") || text.includes("url")) return "links";
+  if (text.includes("require")) return "requirements";
+  if (text.includes("deliverable")) return "deliverables";
+  if (text.includes("step")) return "steps";
+  if (text.includes("task")) return "tasks";
+  if (text.includes("source") || text.includes("material")) return "materialType";
+  return "materialType";
+}
+
+function renderImportReview(draft = {}) {
+  pendingImportDraft = clone(draft);
+  const details = draft.assignmentDetails || {};
+  importControl("reviewCourseCode").value = draft.code || "";
+  importControl("reviewCourseName").value = draft.name || "";
+  importControl("reviewMaterialType").value =
+    draft.sourceType || "Course material";
+  importControl("reviewAssignment").value = draft.assignment || "";
+  importControl("reviewDueDate").value = draft.dueDate || "";
+  importControl("reviewPoints").value = draft.points || "";
+  importControl("reviewStatus").value = importStatusValue(draft.status);
+  importControl("reviewLinks").value = draft.linksText || "";
+  importControl("reviewRequirements").value =
+    (details.requirements || []).join("\n");
+  importControl("reviewDeliverables").value =
+    (details.deliverables || []).join("\n");
+  importControl("reviewTasks").value = draft.tasksText || "";
+  importControl("reviewSteps").value = (details.steps || []).map(
+    (step) => typeof step === "string" ? step : step.title || ""
+  ).filter(Boolean).join("\n");
+
+  const messages = Object.fromEntries(
+    Object.keys(REVIEW_FIELDS).map((key) => [key, []])
+  );
+  (draft.evidence || []).forEach((item) => {
+    const key = reviewFieldForText(item.label);
+    messages[key].push(
+      item.label + ": " + item.value +
+      (item.source ? " (" + item.source + ")" : "")
+    );
+  });
+  (draft.warnings || []).forEach((warning) => {
+    messages[reviewFieldForText(warning)].push("Warning: " + warning);
+  });
+
+  elements.reviewEvidence.innerHTML = Object.entries(REVIEW_FIELDS)
+    .map(([key, field]) => {
+      const control = importControl(field.control);
+      if (messages[key].length === 0) {
+        control.setAttribute("aria-describedby", "");
+        return "";
+      }
+      control.setAttribute("aria-describedby", field.id);
+      return (
+        '<p id="' + field.id + '"><strong>' + escapeHtml(field.label) +
+        ":</strong> " + escapeHtml(messages[key].join(" ")) + "</p>"
+      );
+    })
+    .join("");
+  elements.importReview.hidden = false;
+  elements.saveImportReview.hidden = false;
+  renderImportProgress({ stage: "saved", outcome: "review" });
+  const missingControl = missingImportField(draft);
+  const warningField = (draft.warnings || []).map(reviewFieldForText)[0];
+  const focusControl = missingControl ||
+    REVIEW_FIELDS[warningField]?.control ||
+    "reviewCourseCode";
+  importControl(focusControl).focus();
+  elements.analyzeImport.hidden = true;
+}
+
+function isCourseLevelDraft(draft = {}) {
+  return draft.sourceType === "Syllabus or schedule";
+}
+
+function missingImportField(draft = {}) {
+  if (!String(draft.code || "").trim()) return "reviewCourseCode";
+  if (!String(draft.name || "").trim()) return "reviewCourseName";
+  if (!String(draft.sourceType || "").trim()) return "reviewMaterialType";
+  if (!isCourseLevelDraft(draft) && !String(draft.assignment || "").trim()) {
+    return "reviewAssignment";
+  }
+  if (!isCourseLevelDraft(draft) && !String(draft.dueDate || "").trim()) {
+    return "reviewDueDate";
+  }
+  if (!isCourseLevelDraft(draft) && !parseDueAt(draft.dueDate)) {
+    return "reviewDueDate";
+  }
+  return "";
+}
+
+function shouldAutoSaveDraft(draft = {}) {
+  return !missingImportField(draft) &&
+    Number(draft.confidence) >= 86 &&
+    Array.isArray(draft.warnings) &&
+    draft.warnings.length === 0;
+}
+
+function matchingSavedAssignment(course, draft) {
+  const title = String(draft.assignment || "").trim().toLowerCase();
+  const due = Date.parse(String(draft.dueDate || ""));
+  return [...(course?.assignments || [])].reverse().find((assignment) => {
+    if (String(assignment.title || "").trim().toLowerCase() !== title) {
+      return false;
+    }
+    const assignmentDue = Date.parse(String(assignment.dueDate || ""));
+    if (Number.isFinite(due) && Number.isFinite(assignmentDue)) {
+      return due === assignmentDue;
+    }
+    return String(assignment.dueDate || "").trim().toLowerCase() ===
+      String(draft.dueDate || "").trim().toLowerCase();
+  });
+}
+
+async function commitImportDraft(draft = {}, options = {}) {
+  const previousWorkspace = clone(workspace);
+  const boundCourseId = options.courseId ?? importCourseId;
+  const boundCourse = workspace.courses.find(
+    (course) => course.id === boundCourseId
+  );
+  let finalDraft = clone(draft);
+  if (boundCourseId) {
+    if (!boundCourse) {
+      renderImportReview(finalDraft);
+      showStatus("The selected course is no longer available.", "warn");
+      return false;
+    }
+    if (!options.bound) {
+      finalDraft = bindDraftToCourse(finalDraft, boundCourse);
+    }
+  }
+
+  const result = upsertCourseFromDraft(
+    workspace.courses,
+    finalDraft,
+    boundCourseId || workspace.preferences.activeCourseId
+  );
+  if (!result.course || result.action === "needs-course") {
+    renderImportReview(finalDraft);
+    showStatus(result.message || "Review the course identity before saving.", "warn");
+    return false;
+  }
+  if (
+    boundCourse &&
+    (
+      result.courses.length !== previousWorkspace.courses.length ||
+      result.course.id !== boundCourse.id
+    )
+  ) {
+    renderImportReview(finalDraft);
+    showStatus("Import stayed in review because the selected course could not be guaranteed.", "warn");
+    return false;
+  }
+
+  workspace = {
+    ...workspace,
+    courses: result.courses,
+    preferences: {
+      ...workspace.preferences,
+      activeCourseId: result.course.id,
+      activeView: "courses"
+    }
+  };
+  if (!saveWorkspace()) {
+    workspace = previousWorkspace;
+    pendingImportDraft = clone(finalDraft);
+    renderImportReview(finalDraft);
+    return false;
+  }
+  invalidateUndo();
+
+  const course = workspace.courses.find(
+    (item) => item.id === result.course.id
+  );
+  const syllabus = isCourseLevelDraft(finalDraft);
+  const assignment = syllabus
+    ? null
+    : matchingSavedAssignment(course, finalDraft);
+  state.activeCourseTab = syllabus ? "syllabus" : "assignments";
+  state.selectedAssignmentId = assignment?.id || "";
+  pendingImportDraft = undefined;
+  importCourseId = "";
+  importControl("courseId").value = "";
+  renderCourseRail();
+  const destination = (course.code || course.name || "Course") +
+    " > " + (syllabus ? "Syllabus" : "Assignments");
+  renderImportProgress({
+    stage: "saved",
+    outcome: "saved",
+    destination
+  });
+  await yieldImportStage();
+  if (
+    options.controller &&
+    (
+      options.controller.signal.aborted ||
+      importController !== options.controller
+    )
+  ) {
+    return true;
+  }
+  navigateToView("courses", {
+    focus: false,
+    persist: false
+  });
+  suppressDialogFocusReturn(elements.importDialog);
+  elements.importDialog.close?.();
+  showStatus(
+    "Saved " +
+      (syllabus ? "syllabus" : finalDraft.assignment || "assignment") +
+      " in " + destination + ".",
+    "success"
+  );
+  elements.mainWorkspace.focus();
+  return true;
+}
+
+async function processImport(source, courseId = "") {
+  importController?.abort();
+  const controller = new AbortController();
+  importController = controller;
+  const selectedCourse = workspace.courses.find(
+    (item) => item.id === courseId
+  );
+  if (courseId && !selectedCourse) {
+    importController = undefined;
+    showStatus("The selected course is no longer available.", "warn");
+    return false;
+  }
+  importCourseId = selectedCourse?.id || "";
+  importControl("courseId").value = importCourseId;
+  setImportBusy(true);
+  try {
+    let text;
+    let fileName = "";
+    if (typeof source === "string") {
+      text = source.trim();
+      renderImportProgress({
+        stage: "reading",
+        kind: "text",
+        fileName: "pasted text"
+      });
+      await yieldImportStage();
+    } else {
+      fileName = source?.name || "";
+      const result = await readImportFile(source, {
+        signal: controller.signal,
+        onProgress(progress) {
+          if (
+            !controller.signal.aborted &&
+            importController === controller
+          ) {
+            renderImportProgress(progress);
+          }
+        },
+        ocrImage: recognizeImage
+      });
+      text = result.text;
+      assertCurrentImport(controller);
+      await yieldImportStage();
+    }
+    assertCurrentImport(controller);
+    if (!String(text || "").trim()) {
+      throw new Error("Add pasted text or choose a non-empty supported file.");
+    }
+
+    renderImportProgress({ stage: "extracting" });
+    await yieldImportStage();
+    assertCurrentImport(controller);
+    const rawDraft = createCourseDraftFromMaterial(text, fileName);
+    const draft = selectedCourse
+      ? bindDraftToCourse(rawDraft, selectedCourse)
+      : rawDraft;
+    renderImportProgress({ stage: "checking" });
+    await yieldImportStage();
+    assertCurrentImport(controller);
+    if (shouldAutoSaveDraft(draft)) {
+      return await commitImportDraft(draft, {
+        bound: Boolean(selectedCourse),
+        courseId: selectedCourse?.id || "",
+        controller
+      });
+    }
+    renderImportReview(draft);
+    await yieldImportStage();
+    assertCurrentImport(controller);
+    return false;
+  } catch (error) {
+    if (
+      error.name !== "AbortError" &&
+      importController === controller
+    ) {
+      console.error("ClassPilot import failed.", error);
+      showStatus(error.message || "The material could not be imported.", "warn");
+    }
+    return false;
+  } finally {
+    if (importController === controller) {
+      importController = undefined;
       setImportBusy(false);
     }
-  } finally {
-    input.value = "";
   }
-});
+}
 
-elements.courseFile.addEventListener("change", async () => {
-  const file = elements.courseFile.files?.[0];
-  if (!file) return;
-  const fileKind = getCourseImportFileKind(file);
-  showStatus(`Selected ${file.name}. Reading it now.`, "info");
-
-  try {
-    if (fileKind === "image") {
-      await importScreenshotFile(file);
-      return;
-    }
-
-    if (fileKind !== "text") {
-      showStatus("Unsupported file. Upload a .txt, .md, .csv, .png, .jpg, or .webp file.", "warn");
-      return;
-    }
-
-    try {
-      setImportBusy(true);
-      const text = await readFileAsText(file);
-      elements.courseMaterial.value = text;
-      showStatus(`Read ${file.name}. Extracting course and assignment details.`, "info");
-      importCourseFromMaterial(text, file.name);
-    } catch (error) {
-      showStatus(error.message, "warn");
-    } finally {
-      setImportBusy(false);
-    }
-  } finally {
-    elements.courseFile.value = "";
+function reviewedStatus(value, current = {}) {
+  let status = { ...current };
+  if (value === "assigned") {
+    return {};
   }
-});
+  if (value !== "graded") {
+    status = clearGradingEvidence(status);
+  }
+  if (value === "submitted") {
+    status.late = false;
+    status.submittedAt ||= "Submitted";
+  }
+  if (value === "late") status.late = true;
+  if (value === "graded") {
+    status.grading = "Graded";
+  }
+  return status;
+}
 
-elements.saveReviewCourse.addEventListener("click", () => {
-  importCourseFromReviewedDraft();
-});
+function reviewedImportDraft() {
+  const draft = clone(pendingImportDraft || {});
+  const details = clone(draft.assignmentDetails || {});
+  return {
+    ...draft,
+    code: importControl("reviewCourseCode").value.trim(),
+    name: importControl("reviewCourseName").value.trim(),
+    sourceType: importControl("reviewMaterialType").value,
+    assignment: importControl("reviewAssignment").value.trim(),
+    dueDate: importControl("reviewDueDate").value.trim(),
+    points: importControl("reviewPoints").value.trim(),
+    status: reviewedStatus(
+      importControl("reviewStatus").value,
+      draft.status
+    ),
+    linksText: importControl("reviewLinks").value.trim(),
+    tasksText: importControl("reviewTasks").value.trim(),
+    assignmentDetails: {
+      ...details,
+      requirements: splitReviewLines(
+        importControl("reviewRequirements").value
+      ),
+      deliverables: splitReviewLines(
+        importControl("reviewDeliverables").value
+      ),
+      steps: splitReviewLines(importControl("reviewSteps").value)
+    },
+    reviewed: true
+  };
+}
 
-elements.discardReviewCourse.addEventListener("click", () => {
-  clearImportReview();
-  showStatus("Screenshot review discarded. Upload another screenshot or paste text to continue.", "info");
-});
+function saveReviewedImport() {
+  const draft = reviewedImportDraft();
+  const missing = missingImportField(draft);
+  if (missing) {
+    const control = importControl(missing);
+    const invalidDate = missing === "reviewDueDate" &&
+      Boolean(String(draft.dueDate || "").trim());
+    showStatus(
+      invalidDate
+        ? "Enter a valid due date before saving this assignment."
+        : "Complete the highlighted import field before saving.",
+      "warn"
+    );
+    control.focus();
+    return false;
+  }
+  return commitImportDraft(draft, {
+    bound: false,
+    courseId: importControl("courseId").value
+  });
+}
 
+function cancelImport() {
+  importController?.abort();
+  importController = undefined;
+  setImportBusy(false);
+  elements.importDialog.close?.();
+}
+
+function handleImportSubmit(event) {
+  event.preventDefault();
+  const file = elements.importFile.files?.[0];
+  const text = elements.importText.value.trim();
+  if (!file && !text) {
+    showStatus("Choose one supported file or paste course material.", "warn");
+    elements.importFile.focus();
+    return;
+  }
+  return processImport(file || text, importControl("courseId").value);
+}
+
+function handleImportDrop(event) {
+  event.preventDefault();
+  const file = event.dataTransfer?.files?.[0];
+  if (!file) {
+    showStatus("Drop one supported file to import it.", "warn");
+    return;
+  }
+  return processImport(file, importControl("courseId").value);
+}
+
+function selectCourse(courseId) {
+  const course = workspace.courses.find((item) => item.id === courseId);
+  if (!course) return false;
+  if (!persistWorkspacePreferences({
+    activeCourseId: course.id,
+    activeView: "courses"
+  })) {
+    return false;
+  }
+  state.activeCourseTab = "assignments";
+  state.selectedAssignmentId = "";
+  renderCourseRail();
+  navigateToView("courses", { persist: false });
+  showStatus("Viewing " + (course.code || course.name || "selected course") + ".");
+  return true;
+}
+
+function selectAssignment(button) {
+  const courseId = button.dataset.courseId || "";
+  const course = workspace.courses.find((item) => item.id === courseId);
+  if (!course) return false;
+  const assignment = (course.assignments || []).find(
+    (item) => item.id === (button.dataset.assignmentId || "")
+  );
+  if (!assignment) return false;
+  if (!persistWorkspacePreferences({
+    activeCourseId: course.id,
+    activeView: "courses"
+  })) {
+    return false;
+  }
+  state.activeCourseTab = "assignments";
+  state.selectedAssignmentId = assignment.id;
+  renderCourseRail();
+  navigateToView("courses", { persist: false });
+  showStatus(
+    "Opened " + assignment.title + " in " +
+      (course.code || course.name || "its course") + "."
+  );
+  return true;
+}
+
+function handleDocumentClick(event) {
+  const dialogClose = event.target.closest("[data-dialog-close]");
+  if (dialogClose) {
+    dialogClose.closest("dialog")?.close();
+    return;
+  }
+
+  if (event.target.closest("[data-undo]")) {
+    restoreUndo();
+    return;
+  }
+
+  const calendarMonth = event.target.closest("[data-calendar-month]");
+  if (calendarMonth) {
+    state.calendarCursor = new Date(
+      state.calendarCursor.getFullYear(),
+      state.calendarCursor.getMonth() +
+        (calendarMonth.dataset.calendarMonth === "previous" ? -1 : 1),
+      1
+    );
+    state.selectedCalendarDate = localDateKey(state.calendarCursor);
+    renderCalendar();
+    return;
+  }
+
+  const calendarDate = event.target.closest("[data-calendar-date]");
+  if (calendarDate) {
+    state.selectedCalendarDate = calendarDate.dataset.calendarDate;
+    renderCalendar();
+    return;
+  }
+
+  const assignmentEditor = event.target.closest("[data-edit-assignment]");
+  if (assignmentEditor) {
+    openAssignmentEditor(
+      assignmentEditor.dataset.courseId,
+      assignmentEditor.dataset.assignmentId,
+      assignmentEditor
+    );
+    return;
+  }
+
+  const coursePlanEditor = event.target.closest("[data-edit-course-plan]");
+  if (coursePlanEditor) {
+    openCoursePlanEditor(coursePlanEditor.dataset.courseId, coursePlanEditor);
+    return;
+  }
+
+  const assignmentDelete = event.target.closest("[data-delete-assignment]");
+  if (assignmentDelete) {
+    deleteAssignmentWithUndo(
+      assignmentDelete.dataset.courseId,
+      assignmentDelete.dataset.assignmentId
+    );
+    return;
+  }
+
+  const courseDelete = event.target.closest("[data-delete-course]");
+  if (courseDelete) {
+    deleteCourseWithUndo(courseDelete.dataset.courseId);
+    return;
+  }
+
+  const taskDelete = event.target.closest("[data-delete-task]");
+  if (taskDelete) {
+    deleteTaskWithUndo(
+      taskDelete.dataset.courseId,
+      taskDelete.dataset.assignmentId,
+      taskDelete.dataset.taskId
+    );
+    return;
+  }
+
+  const taskEditor = event.target.closest("[data-edit-task]");
+  if (taskEditor) {
+    openTaskEditor(
+      taskEditor.dataset.courseId,
+      taskEditor.dataset.assignmentId,
+      taskEditor.dataset.taskId,
+      taskEditor
+    );
+    return;
+  }
+
+  const taskCheckbox = event.target.closest("[data-task-id]");
+  if (taskCheckbox?.matches("input[type=checkbox]")) {
+    const task = findAssignment(
+      taskCheckbox.dataset.courseId,
+      taskCheckbox.dataset.assignmentId
+    )?.tasks?.find((item) => item.id === taskCheckbox.dataset.taskId);
+    const saved = setTaskCompletion(
+      taskCheckbox.dataset.courseId,
+      taskCheckbox.dataset.assignmentId,
+      taskCheckbox.dataset.taskId,
+      taskCheckbox.checked
+    );
+    if (!saved) taskCheckbox.checked = Boolean(task?.done);
+    return;
+  }
+
+  const viewButton = event.target.closest("[data-view]");
+  if (viewButton) {
+    navigateToView(viewButton.dataset.view);
+    return;
+  }
+
+  const actionButton = event.target.closest("[data-action]");
+  if (actionButton) {
+    if (actionButton.dataset.action === "open-courses") {
+      navigateToView("courses");
+    }
+    if (actionButton.dataset.action === "open-import") {
+      openImportDialog(actionButton.dataset.courseId || "", actionButton);
+    }
+    if (actionButton.dataset.action === "confirm-clear-workspace") {
+      clearWorkspaceAfterConfirmation();
+    }
+    return;
+  }
+
+  const courseButton = event.target.closest("[data-select-course]");
+  if (courseButton) {
+    selectCourse(courseButton.dataset.courseId);
+    return;
+  }
+
+  const assignmentButton = event.target.closest("[data-assignment-id]");
+  if (assignmentButton) {
+    selectAssignment(assignmentButton);
+    return;
+  }
+
+  const courseTab = event.target.closest("[data-course-tab]");
+  if (courseTab) {
+    activateCourseTab(courseTab.dataset.courseTab, true);
+    return;
+  }
+}
+
+function handleHistoryRoute() {
+  navigateToView(window.location.hash, {
+    focus: false,
+    persist: true,
+    updateHash: false
+  });
+  if (window.location.hash !== "#" + state.activeView) {
+    window.history.replaceState(null, "", "#" + state.activeView);
+  }
+}
+
+function initialize() {
+  workspace = loadWorkspace();
+
+  if (
+    !workspace.courses.some(
+      (course) => course.id === workspace.preferences.activeCourseId
+    )
+  ) {
+    workspace.preferences.activeCourseId = workspace.courses[0]?.id || "";
+  }
+
+  state.activeView = routeFromHash();
+  renderAll();
+
+  if (window.location.hash !== "#" + state.activeView) {
+    window.history.replaceState(null, "", "#" + state.activeView);
+  }
+  if (state.storageAvailable) {
+    showStatus("Workspace ready. Your course data stays in this browser.");
+  }
+}
+
+document.addEventListener("click", handleDocumentClick);
+elements.globalImportButton.addEventListener("click", (event) => {
+  openImportDialog("", event.currentTarget);
+});
+elements.headerImportButton.addEventListener("click", (event) => {
+  openImportDialog("", event.currentTarget);
+});
+elements.importForm.addEventListener("submit", handleImportSubmit);
+elements.assignmentForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitAssignmentEdit(event.currentTarget);
+});
 elements.taskForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  addTaskFromForm();
+  submitTaskEdit(event.currentTarget);
 });
-
-elements.taskTitle.addEventListener("input", refreshActionStates);
-
-document.querySelector(".segmented").addEventListener("click", (event) => {
-  const button = event.target.closest("[data-language]");
-  if (!button) return;
-  explanationLanguage = button.dataset.language;
-  document
-    .querySelectorAll("[data-language]")
-    .forEach((item) => item.classList.toggle("active", item === button));
-  renderCoach(getActiveCourse());
+elements.coursePlanForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitCoursePlanEdit(event.currentTarget);
 });
-
-elements.deleteCourse.addEventListener("click", () => {
-  deleteActiveCourse();
-});
-
-elements.clearCourses.addEventListener("click", () => {
-  const state = getCurrentActionAvailability();
-  if (!state.clearData.enabled) {
-    showStatus(state.clearData.message, "warn");
-    refreshActionStates();
+elements.cancelImport.addEventListener("click", cancelImport);
+elements.saveImportReview.addEventListener("click", saveReviewedImport);
+elements.calendarCourseFilter.addEventListener("change", () => {
+  const nextFilter = elements.calendarCourseFilter.value || "all";
+  if (!persistWorkspacePreferences({
+    calendarCourseFilter: nextFilter
+  })) {
+    elements.calendarCourseFilter.value =
+      workspace.preferences.calendarCourseFilter || "all";
     return;
   }
-  courses = [];
-  activeCourseId = "";
-  saveCourses();
-  renderAll();
-  showStatus("All saved course data was cleared.", "success");
+  renderCalendar();
 });
+elements.calendarTypeFilter.addEventListener("change", () => {
+  state.calendarTypeFilter = elements.calendarTypeFilter.value || "all";
+  renderCalendar();
+});
+elements.exportCalendar.addEventListener("click", downloadCalendar);
+elements.exportBackup.addEventListener("click", downloadBackup);
+elements.importBackup.addEventListener("change", handleBackupFileChange);
+elements.restoreBackup.addEventListener("click", restoreBackup);
+elements.clearWorkspace.addEventListener("click", (event) => {
+  requestClearWorkspace(event.currentTarget);
+});
+elements.importDropZone.addEventListener("dragover", (event) => {
+  event.preventDefault();
+});
+elements.importDropZone.addEventListener("drop", handleImportDrop);
+elements.courseWorkspace.addEventListener("input", handleAssignmentFilterChange);
+elements.courseWorkspace.addEventListener("change", handleAssignmentFilterChange);
+elements.importDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  cancelImport();
+});
+elements.confirmationDialog.addEventListener("close", () => {
+  clearWorkspaceConfirmationPending = false;
+});
+elements.confirmationDialog.addEventListener("cancel", () => {
+  clearWorkspaceConfirmationPending = false;
+});
+[elements.importDialog, elements.assignmentDialog, elements.taskDialog,
+  elements.coursePlanDialog, elements.confirmationDialog].forEach((dialog) => {
+  dialog.addEventListener("close", () => restoreDialogFocus(dialog));
+});
+elements.courseTabs.addEventListener("keydown", handleCourseTabKeydown);
+window.addEventListener("hashchange", handleHistoryRoute);
 
-renderAll();
+initialize();

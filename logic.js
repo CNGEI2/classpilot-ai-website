@@ -1,6 +1,47 @@
 (function attachClassPilotLogic(root) {
-  const monthPattern =
-    "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
+  const monthNamePattern =
+    "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
+  const monthPattern = `${monthNamePattern}\\.?`;
+  const deadlineMonthNames = {
+    jan: "Jan",
+    january: "Jan",
+    feb: "Feb",
+    february: "Feb",
+    mar: "Mar",
+    march: "Mar",
+    apr: "Apr",
+    april: "Apr",
+    may: "May",
+    jun: "Jun",
+    june: "Jun",
+    jul: "Jul",
+    july: "Jul",
+    aug: "Aug",
+    august: "Aug",
+    sep: "Sep",
+    sept: "Sep",
+    september: "Sep",
+    oct: "Oct",
+    october: "Oct",
+    nov: "Nov",
+    november: "Nov",
+    dec: "Dec",
+    december: "Dec"
+  };
+  const deadlineMonthNumbers = {
+    Jan: 1,
+    Feb: 2,
+    Mar: 3,
+    Apr: 4,
+    May: 5,
+    Jun: 6,
+    Jul: 7,
+    Aug: 8,
+    Sep: 9,
+    Oct: 10,
+    Nov: 11,
+    Dec: 12
+  };
 
   const explanationBank = {
     rubric: {
@@ -82,22 +123,29 @@
     };
   }
 
-  function createCourseFromMaterial(material, filename = "") {
-    return createCourseFromDraft(createCourseDraftFromMaterial(material, filename));
+  function createCourseFromMaterial(material, filename = "", options = {}) {
+    return createCourseFromDraft(
+      createCourseDraftFromMaterial(material, filename, options)
+    );
   }
 
-  function createCourseDraftFromMaterial(material, filename = "") {
+  function createCourseDraftFromMaterial(
+    material,
+    filename = "",
+    options = {}
+  ) {
     const rawSource = String(material || "").trim();
     const source = normalizeImportedSource(rawSource);
     const lines = source
       .split(/\r?\n/)
       .map(cleanImportedLine)
       .filter(Boolean);
+    const dateContext = academicDateContext(lines, options);
     const sourceType = classifyMaterial(lines, source);
-    const analysis = analyzeSyllabus(source);
+    const analysis = analyzeSyllabus(source, dateContext);
     const deadlines = refineCanvasDeadlines(analysis.deadlines, lines, sourceType);
     const metadata = inferMaterialMetadata(lines);
-    const status = inferAssignmentStatus(lines);
+    const status = inferAssignmentStatus(lines, dateContext);
     const primaryDeadline = deadlines[0] || { label: "Next assignment", date: "" };
     const identity = refineCourseIdentity(inferCourseIdentity(lines, filename, primaryDeadline.label), {
       sourceType,
@@ -108,8 +156,36 @@
     const tasksText = inferSmartTaskText(lines, analysis.deadlines, metadata, primaryDeadline.label, sourceType, status);
     const assignmentDetails = inferAssignmentDetails(lines, source, metadata, status, primaryDeadline, sourceType);
     const coursePlan = inferCoursePlan(lines, { ...analysis, deadlines }, topicsText, sourceType);
-    const warnings = buildDraftWarnings({ identity, primaryDeadline, tasksText, sourceType, lines });
-    const evidence = buildExtractionEvidence({ identity, primaryDeadline, metadata, status, sourceType, lines });
+    const scheduleDateIssues = Array.isArray(analysis.dateIssues)
+      ? clone(analysis.dateIssues)
+      : [];
+    const warnings = [
+      ...buildDraftWarnings({
+        identity,
+        primaryDeadline,
+        tasksText,
+        sourceType,
+        lines
+      }),
+      ...buildScheduleDateWarnings(scheduleDateIssues)
+    ];
+    const evidence = [
+      ...buildExtractionEvidence({
+        identity,
+        primaryDeadline,
+        metadata,
+        status,
+        sourceType,
+        lines
+      }),
+      ...scheduleDateIssues.map((issue) => ({
+        label: issue.kind === "ambiguous"
+          ? "Ambiguous syllabus date"
+          : "Invalid syllabus date",
+        value: issue.value,
+        source: issue.source
+      }))
+    ];
     const confidence = scoreDraftConfidence({ identity, primaryDeadline, tasksText, metadata, status, sourceType, evidence, warnings });
 
     return {
@@ -125,11 +201,13 @@
       assignmentDetails,
       coursePlan,
       deadlines,
+      filename: normalizeText(filename),
       sourceType,
       confidence,
       confidenceLabel: confidenceLabel(confidence),
       evidence,
       warnings,
+      scheduleDateIssues,
       actionPlan: buildActionPlan(primaryDeadline, metadata, tasksText, sourceType, status),
       rawText: rawSource
     };
@@ -154,6 +232,7 @@
       tasks: assignment.tasks,
       deadlines: mergeCourseDeadlines(course, Array.isArray(draft.deadlines) ? draft.deadlines.slice(1) : []).deadlines,
       assignments: [assignment],
+      source: buildAssignmentSource(draft),
       sourceType: draft.sourceType || "Course material",
       confidence: Number(draft.confidence) || 0,
       confidenceLabel: draft.confidenceLabel || confidenceLabel(Number(draft.confidence) || 0),
@@ -973,7 +1052,15 @@
 
     if (sourceType === "Canvas submitted assignment") {
       if (/review feedback/i.test(status.nextUp || "")) addTask("Review instructor feedback");
-      if (status.score === "N/A" || /ungraded/i.test(status.grading || "")) addTask("Watch for grading because the score is not available yet");
+      if (
+        (
+          Object.prototype.hasOwnProperty.call(status, "score") &&
+          !hasMeaningfulScore(status.score)
+        ) ||
+        /ungraded/i.test(status.grading || "")
+      ) {
+        addTask("Watch for grading because the score is not available yet");
+      }
       if (status.late) addTask("Note the late submission status");
     }
 
@@ -1048,7 +1135,7 @@
     };
   }
 
-  function inferAssignmentStatus(lines) {
+  function inferAssignmentStatus(lines, dateContext = {}) {
     const status = {};
     const submittedLine = lines.find((line) => /^submitted on\b/i.test(line));
     const nextUpLine = lines.find((line) => /^next up\s*:/i.test(line));
@@ -1067,7 +1154,10 @@
       if (gradingMatch) status.grading = capitalizeStatus(gradingMatch[1]);
     }
     if (submittedLine) {
-      status.submittedAt = formatDeadlineDate(submittedLine.replace(/^submitted on\s*/i, ""));
+      status.submittedAt = formatDeadlineDate(
+        submittedLine.replace(/^submitted on\s*/i, ""),
+        dateContext
+      );
     }
     if (nextUpLine) {
       status.nextUp = normalizeText(nextUpLine.replace(/^next up\s*:?\s*/i, ""));
@@ -1110,6 +1200,17 @@
       warnings.push("Canvas breadcrumb was not readable, so course identity may need correction.");
     }
     return warnings;
+  }
+
+  function buildScheduleDateWarnings(issues = []) {
+    return issues.map((issue) => {
+      const label = normalizeText(issue.label) || "course deadline";
+      const value = normalizeText(issue.value);
+      if (issue.kind === "ambiguous") {
+        return `Syllabus date ${value} for ${label} is ambiguous. Use a month name and four-digit year, then re-import before replacing this schedule.`;
+      }
+      return `Syllabus date ${value} for ${label} is invalid. Correct the month and day, then re-import before replacing this schedule.`;
+    });
   }
 
   function buildExtractionEvidence({ identity, primaryDeadline, metadata, status = {}, sourceType, lines }) {
@@ -1259,12 +1360,24 @@
   function createAssignmentFromDraft(draft = {}, courseId = "") {
     const title = normalizeText(draft.assignment) || "Imported assignment";
     const assignmentId = slugify(`${courseId || draft.code || "course"}-${title}-${draft.dueDate || "no-date"}`) || `assignment-${Date.now()}`;
-    const tasks = splitLines(draft.tasksText).map((taskTitle, index) => ({
-      id: `${assignmentId}-task-${index + 1}`,
-      title: taskTitle,
-      done: false,
-      assignmentId
-    }));
+    const timestamp = new Date().toISOString();
+    const taskScope = importedTaskScope(title, draft.dueDate);
+    const taskIdentityCounts = new Map();
+    const tasks = splitLines(draft.tasksText).map((taskTitle) => {
+      const identity = importedTaskSemanticBase(taskTitle);
+      const occurrence = (taskIdentityCounts.get(identity) || 0) + 1;
+      taskIdentityCounts.set(identity, occurrence);
+      const semanticKey = identity +
+        (occurrence > 1 ? `-${occurrence}` : "");
+      return {
+        id: importedTaskIdentity(taskScope, semanticKey),
+        semanticKey,
+        semanticOccurrence: occurrence,
+        title: taskTitle,
+        done: false,
+        assignmentId
+      };
+    });
     const assignment = {
       id: assignmentId,
       title,
@@ -1278,6 +1391,10 @@
       warnings: Array.isArray(draft.warnings) ? clone(draft.warnings) : [],
       actionPlan: Array.isArray(draft.actionPlan) ? draft.actionPlan.slice() : [],
       details: draft.assignmentDetails || {},
+      links: splitLines(draft.linksText),
+      source: buildAssignmentSource(draft),
+      createdAt: timestamp,
+      updatedAt: timestamp,
       tasks
     };
 
@@ -1287,12 +1404,128 @@
     };
   }
 
+  function normalizedTaskIdentityContent(value) {
+    return normalizeText(value)
+      .normalize("NFKC")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function stableTaskIdentityHash(value) {
+    let hash = 2166136261;
+    for (const character of value) {
+      hash ^= character.codePointAt(0);
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    return hash.toString(36);
+  }
+
+  function importedTaskSemanticBase(title) {
+    const content = normalizedTaskIdentityContent(title) || "task";
+    const label = slugify(content).slice(0, 36) || "task";
+    return `${label}-${stableTaskIdentityHash(content)}`;
+  }
+
+  function importedTaskScope(title, dueDate) {
+    const timestamp = Date.parse(normalizeText(dueDate));
+    const dueIdentity = Number.isFinite(timestamp)
+      ? String(timestamp)
+      : normalizeComparable(dueDate);
+    return stableTaskIdentityHash(
+      `${normalizedTaskIdentityContent(title)}|${dueIdentity}`
+    );
+  }
+
+  function importedTaskIdentity(scope, semanticKey) {
+    return `imported-task-semantic-${scope}-${semanticKey}`;
+  }
+
+  function taskSemanticOccurrence(task) {
+    const occurrence = Number(task.semanticOccurrence);
+    return Number.isInteger(occurrence) && occurrence > 0 ? occurrence : 1;
+  }
+
+  function taskMatchesSemanticKey(candidate, task) {
+    const semanticKey = normalizeText(task.semanticKey);
+    if (!semanticKey) return false;
+    if (normalizeText(candidate.semanticKey) === semanticKey) return true;
+    const candidateId = normalizeText(candidate.id);
+    return candidateId.includes("-task-semantic-") &&
+      candidateId.endsWith("-" + semanticKey);
+  }
+
+  function taskTitleMatchesSemanticKey(candidate, task) {
+    const occurrence = taskSemanticOccurrence(task);
+    const expected = importedTaskSemanticBase(candidate.title) +
+      (occurrence > 1 ? `-${occurrence}` : "");
+    return expected === normalizeText(task.semanticKey);
+  }
+
+  function buildAssignmentSource(draft = {}) {
+    return {
+      fileName: normalizeText(draft.filename),
+      sourceType: normalizeText(draft.sourceType || "Course material"),
+      importedAt: new Date().toISOString(),
+      confidence: Number(draft.confidence) || 0,
+      warnings: clone(draft.warnings || []),
+      evidence: clone(draft.evidence || [])
+    };
+  }
+
+  function preserveMatchingTaskState(existing = {}, incoming = {}) {
+    const existingTasks = Array.isArray(existing.tasks) ? existing.tasks : [];
+    const usedIndexes = new Set();
+    const findMatchIndex = (task) => {
+      if (normalizeText(task.semanticKey)) {
+        const idIndex = existingTasks.findIndex((candidate, index) =>
+          !usedIndexes.has(index) &&
+          taskMatchesSemanticKey(candidate, task)
+        );
+        if (idIndex >= 0) return idIndex;
+      }
+
+      const incomingTitle = normalizeComparable(task.title);
+      if (!incomingTitle) return -1;
+      return existingTasks.findIndex((candidate, index) =>
+        !usedIndexes.has(index) &&
+        normalizeComparable(candidate.title) === incomingTitle
+      );
+    };
+
+    const assignmentId = existing.id || incoming.id;
+    return {
+      ...incoming,
+      id: assignmentId,
+      createdAt: existing.createdAt || incoming.createdAt,
+      links: [...new Set([
+        ...(Array.isArray(existing.links) ? existing.links : []),
+        ...(Array.isArray(incoming.links) ? incoming.links : [])
+      ])],
+      tasks: (incoming.tasks || []).map((task) => {
+        const matchIndex = findMatchIndex(task);
+        const matchingTask = matchIndex >= 0 ? existingTasks[matchIndex] : null;
+        const preserveLocalTitle = matchingTask &&
+          normalizeText(task.semanticKey) &&
+          !taskTitleMatchesSemanticKey(matchingTask, task);
+        if (matchIndex >= 0) usedIndexes.add(matchIndex);
+        return {
+          ...(matchingTask || {}),
+          ...task,
+          assignmentId,
+          title: preserveLocalTitle ? matchingTask.title : task.title,
+          done: matchingTask ? Boolean(matchingTask.done) : Boolean(task.done)
+        };
+      })
+    };
+  }
+
   function categorizeAssignment(assignment = {}) {
     const status = assignment.status || {};
-    const score = normalizeText(status.score);
     const nextUp = normalizeText(status.nextUp).toLowerCase();
 
-    if (score && score !== "N/A") return "Graded";
+    if (hasMeaningfulScore(status.score)) return "Graded";
     if (nextUp.includes("review feedback")) return "Feedback";
     if (status.submittedAt && status.late) return "Submitted late";
     if (status.submittedAt) return "Submitted";
@@ -1339,11 +1572,16 @@
   }
 
   function assignmentIdentityKey(assignment = {}) {
-    return `${normalizeComparable(assignment.title)}|${normalizeComparable(assignment.dueDate)}`;
+    const dueDate = normalizeText(assignment.dueDate);
+    const timestamp = Date.parse(dueDate);
+    const normalizedDueDate = Number.isFinite(timestamp)
+      ? String(timestamp)
+      : normalizeComparable(dueDate);
+    return `${normalizeComparable(assignment.title)}|${normalizedDueDate}`;
   }
 
   function normalizeCourseAssignments(course = {}) {
-    if (Array.isArray(course.assignments) && (course.assignments.length > 0 || course.coursePlan?.syllabusUploaded)) {
+    if (Array.isArray(course.assignments)) {
       return {
         ...clone(course),
         assignments: course.assignments.map((assignment) => ({
@@ -1432,7 +1670,9 @@
     );
     const isCourseLevel = draft.sourceType === "Syllabus or schedule";
     const hasAssignmentFields = Boolean(normalizeText(draft.assignment) && normalizeText(draft.dueDate));
-    const canTrustCourseBinding = isCourseLevel || (hasAssignmentFields && warnings.length === 0);
+    const canTrustCourseBinding = isCourseLevel
+      ? warnings.length === 0
+      : hasAssignmentFields && warnings.length === 0;
     const confidence = canTrustCourseBinding ? Math.max(Number(draft.confidence) || 0, 88) : Number(draft.confidence) || 0;
 
     return {
@@ -1512,7 +1752,10 @@
     const existingIndex = updated.assignments.findIndex((item) => assignmentIdentityKey(item) === nextKey);
 
     if (existingIndex >= 0) {
-      updated.assignments[existingIndex] = nextAssignment;
+      updated.assignments[existingIndex] = preserveMatchingTaskState(
+        updated.assignments[existingIndex],
+        nextAssignment
+      );
     } else {
       updated.assignments.push(nextAssignment);
     }
@@ -1530,6 +1773,20 @@
     const courses = Array.isArray(courseList) ? clone(courseList).map(normalizeCourseAssignments) : [];
     const coursePlan = draft.coursePlan || {};
     const courseLevelOnly = isCourseLevelDraft(draft);
+    const scheduleDateIssues = Array.isArray(draft.scheduleDateIssues)
+      ? draft.scheduleDateIssues
+      : [];
+
+    if (courseLevelOnly && scheduleDateIssues.length > 0) {
+      return {
+        courses,
+        activeCourseId,
+        course: null,
+        assignment,
+        action: "needs-date-review",
+        message: "Correct the syllabus date or re-import the material before replacing this course schedule."
+      };
+    }
 
     if (!key) {
       return {
@@ -1547,6 +1804,7 @@
     if (existingIndex >= 0) {
       const baseCourse = {
         ...courses[existingIndex],
+        source: courseLevelOnly ? course.source : courses[existingIndex].source,
         coursePlan: courseLevelOnly ? mergeCoursePlan(courses[existingIndex].coursePlan, coursePlan) : courses[existingIndex].coursePlan
       };
       const merged = courseLevelOnly ? refreshCourseFromAssignments(baseCourse) : mergeAssignmentIntoCourse(baseCourse, assignment);
@@ -1591,8 +1849,8 @@
       meetingLocation: incoming.meetingLocation || existing.meetingLocation || "",
       officeHours: incoming.officeHours || existing.officeHours || "",
       email: incoming.email || existing.email || "",
-      deadlines: mergeDeadlineLists(existing.deadlines || [], incoming.deadlines || []),
-      exams: mergeDeadlineLists(existing.exams || [], incoming.exams || []),
+      deadlines: mergeDeadlineLists([], incoming.deadlines || []),
+      exams: mergeDeadlineLists([], incoming.exams || []),
       grading: mergeLabelValueList(existing.grading || [], incoming.grading || []),
       weeklyGuide: mergeWeeklyGuide(existing.weeklyGuide || [], incoming.weeklyGuide || []),
       policies: mergePolicyList(existing.policies || [], incoming.policies || []),
@@ -1755,6 +2013,21 @@
     return String(value || "").replace(/\s+/g, " ").trim();
   }
 
+  function hasMeaningfulScore(value) {
+    if (typeof value === "number") return Number.isFinite(value);
+    if (typeof value !== "string") return false;
+    const score = value.replace(/\s+/g, " ").trim().toLowerCase();
+    if (!score) return false;
+    return ![
+      "n/a",
+      "na",
+      "pending",
+      "ungraded",
+      "not graded",
+      "--"
+    ].includes(score);
+  }
+
   function splitLines(value) {
     return String(value || "")
       .split(/\n|;/)
@@ -1796,8 +2069,143 @@
       .replace(/[.:,-]+$/g, "");
   }
 
-  function formatDeadlineDate(rawDate) {
-    const source = normalizeText(rawDate).replace(/,$/, "");
+  function validNow(value) {
+    const date = new Date(value ?? Date.now());
+    return Number.isFinite(date.getTime()) ? date : new Date();
+  }
+
+  function academicDateContext(lines = [], options = {}) {
+    const sourceOptions = options instanceof Date ? { now: options } : options;
+    const now = validNow(sourceOptions.now);
+    let academicYear = Number(sourceOptions.academicYear) || 0;
+    let academicYearStart =
+      Number(sourceOptions.academicYearStart) || 0;
+    let academicYearEnd =
+      Number(sourceOptions.academicYearEnd) || 0;
+    let term = normalizeText(sourceOptions.term).toLowerCase();
+    if (academicYearEnd !== academicYearStart + 1) {
+      academicYearStart = 0;
+      academicYearEnd = 0;
+    }
+
+    if (!academicYear && !academicYearStart) {
+      for (const line of lines) {
+        const normalizedLine = normalizeText(line);
+        const termMatch = normalizedLine.match(
+          /\b(spring|summer|fall|autumn|winter)\b/i
+        );
+        if (!term && termMatch) {
+          term = termMatch[1].toLowerCase();
+        }
+        if (academicYearStart) continue;
+        const academicYearLabel = normalizedLine.match(
+          /\bacademic\s+year\b(.{0,60})/i
+        );
+        if (academicYearLabel) {
+          const labeledYears = [
+            ...academicYearLabel[1].matchAll(/\b20\d{2}\b/g)
+          ].map((match) => Number(match[0]));
+          const range = normalizedLine.match(
+            /\bacademic\s+year\b[^0-9]{0,24}(20\d{2})(?:\s*[-\u2010-\u2015]\s*|\s+)(20\d{2})\b/i
+          );
+          if (
+            range &&
+            Number(range[2]) === Number(range[1]) + 1
+          ) {
+            academicYearStart = Number(range[1]);
+            academicYearEnd = Number(range[2]);
+            continue;
+          }
+          if (labeledYears.length === 1) {
+            academicYear = labeledYears[0];
+            break;
+          }
+          if (labeledYears.length > 1) continue;
+        }
+        const season = normalizedLine.match(
+          /\b(spring|summer|fall|autumn|winter)\b[^0-9]{0,18}\b(20\d{2})\b/i
+        );
+        if (season) {
+          term = season[1].toLowerCase();
+          academicYear = Number(season[2]);
+          break;
+        }
+        const labeledYear = normalizedLine.match(
+          /\b(?:semester(?:\s+and\s+year)?|term|academic\s+year)\b[^0-9]{0,24}\b(20\d{2})\b/i
+        );
+        if (labeledYear) {
+          academicYear = Number(labeledYear[1]);
+          break;
+        }
+      }
+    }
+
+    return {
+      now,
+      academicYear,
+      academicYearStart,
+      academicYearEnd,
+      term
+    };
+  }
+
+  function localCalendarDate(year, month, day, hour = 0, minute = 0) {
+    const date = new Date(0);
+    date.setFullYear(year, month - 1, day);
+    date.setHours(hour, minute, 0, 0);
+    return date;
+  }
+
+  function contextualDeadlineYear(month, day, options = {}) {
+    const context = academicDateContext([], options);
+    if (context.academicYearStart && context.academicYearEnd) {
+      if (["spring", "summer"].includes(context.term)) {
+        return context.academicYearEnd;
+      }
+      return month <= 6
+        ? context.academicYearEnd
+        : context.academicYearStart;
+    }
+    if (context.academicYear) {
+      if (
+        ["fall", "autumn"].includes(context.term) &&
+        month <= 6
+      ) {
+        return context.academicYear + 1;
+      }
+      return context.academicYear;
+    }
+
+    const currentYear = context.now.getFullYear();
+    const currentMonth = context.now.getMonth() + 1;
+    return currentMonth >= 7 && month <= 6
+      ? currentYear + 1
+      : currentYear;
+  }
+
+  function looksLikeStructuredEnglishDate(value) {
+    const source = normalizeText(value);
+    const separator = "[\\s,./-]+";
+    const monthFirst = new RegExp(
+      `(?:^|\\b)${monthPattern}${separator}\\d{1,2}(?!\\d)`,
+      "i"
+    );
+    const dayFirst = new RegExp(
+      `(?:^|\\D)\\d{1,2}(?!\\d)${separator}${monthPattern}(?=$|[\\s,./-])`,
+      "i"
+    );
+    const yearFirst = new RegExp(
+      `(?:^|\\D)\\d{4}${separator}${monthPattern}${separator}\\d{1,2}(?!\\d)`,
+      "i"
+    );
+    return monthFirst.test(source) ||
+      dayFirst.test(source) ||
+      yearFirst.test(source);
+  }
+
+  function parseStructuredEnglishDate(value, options = {}) {
+    const source = normalizeText(value).replace(/,$/, "");
+    if (!source) return { matched: false, valid: false };
     const dateTime = splitDeadlineDateTime(source);
     const weekdayNames = {
       mon: "Mon",
@@ -1815,63 +2223,173 @@
       sun: "Sun",
       sunday: "Sun"
     };
-    const monthNames = {
-      jan: "Jan",
-      january: "Jan",
-      feb: "Feb",
-      february: "Feb",
-      mar: "Mar",
-      march: "Mar",
-      apr: "Apr",
-      april: "Apr",
-      may: "May",
-      jun: "Jun",
-      june: "Jun",
-      jul: "Jul",
-      july: "Jul",
-      aug: "Aug",
-      august: "Aug",
-      sep: "Sep",
-      september: "Sep",
-      oct: "Oct",
-      october: "Oct",
-      nov: "Nov",
-      november: "Nov",
-      dec: "Dec",
-      december: "Dec"
+    const weekdayMatch = dateTime.date.match(
+      /^(Mon(?:day)?|Tue(?:sday)?|Wed(?:nesday)?|Thu(?:rsday)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?),?\s+(.+)$/i
+    );
+    const weekday = weekdayMatch
+      ? weekdayNames[weekdayMatch[1].toLowerCase()]
+      : "";
+    const datePart = weekdayMatch ? weekdayMatch[2] : dateTime.date;
+    const monthFirst =
+      datePart.match(
+        /^([A-Za-z]+\.?)\s+(\d{1,2})(?:,?\s+(\d{4}))?$/
+      ) ||
+      datePart.match(
+        /^([A-Za-z]+)[./-](\d{1,2})[./-](\d{4})$/
+      );
+    const dayFirst =
+      datePart.match(
+        /^(\d{1,2})\s+([A-Za-z]+\.?)(?:,?\s+(\d{4}))?$/
+      ) ||
+      datePart.match(
+        /^(\d{1,2})[./-]([A-Za-z]+)[./-](\d{4})$/
+      );
+    if (!monthFirst && !dayFirst) {
+      return {
+        matched: looksLikeStructuredEnglishDate(datePart),
+        valid: false
+      };
+    }
+    const monthToken = monthFirst ? monthFirst[1] : dayFirst[2];
+    const monthName = deadlineMonthNames[
+      monthToken.toLowerCase().replace(/\.$/, "")
+    ];
+    if (!monthName) {
+      return {
+        matched: looksLikeStructuredEnglishDate(datePart),
+        valid: false
+      };
+    }
+
+    const month = deadlineMonthNumbers[monthName];
+    const day = Number(monthFirst ? monthFirst[2] : dayFirst[1]);
+    const yearToken = monthFirst ? monthFirst[3] : dayFirst[3];
+    const explicitYear = yearToken ? Number(yearToken) : 0;
+    const year = explicitYear ||
+      contextualDeadlineYear(month, day, options);
+    if (
+      dateTime.invalidTime ||
+      !isValidCalendarDate(year, month, day)
+    ) {
+      return { matched: true, valid: false };
+    }
+
+    let hour = 0;
+    let minute = 0;
+    if (dateTime.time) {
+      const amPm = dateTime.time.match(
+        /^(\d{1,2}):(\d{2})\s+(AM|PM)$/
+      );
+      const twentyFourHour = dateTime.time.match(/^(\d{2}):(\d{2})$/);
+      if (amPm) {
+        hour = Number(amPm[1]) % 12 +
+          (amPm[3] === "PM" ? 12 : 0);
+        minute = Number(amPm[2]);
+      } else if (twentyFourHour) {
+        hour = Number(twentyFourHour[1]);
+        minute = Number(twentyFourHour[2]);
+      }
+    }
+
+    const date = localCalendarDate(year, month, day, hour, minute);
+    return {
+      matched: true,
+      valid: true,
+      inferredYear: !explicitYear,
+      year,
+      month,
+      day,
+      dueAt: date.toISOString(),
+      formatted: appendDeadlineTime(
+        formatDeadlineDatePart(
+          monthName,
+          day,
+          String(year),
+          weekday
+        ),
+        dateTime.time
+      )
+    };
+  }
+
+  function formatDeadlineDate(rawDate, options = {}) {
+    const source = normalizeText(rawDate).replace(/,$/, "");
+    const structuredEnglish = parseStructuredEnglishDate(source, options);
+    if (structuredEnglish.matched) {
+      return structuredEnglish.valid ? structuredEnglish.formatted : "";
+    }
+    const dateTime = splitDeadlineDateTime(source);
+    if (dateTime.invalidTime) return "";
+    const weekdayNames = {
+      mon: "Mon",
+      monday: "Mon",
+      tue: "Tue",
+      tuesday: "Tue",
+      wed: "Wed",
+      wednesday: "Wed",
+      thu: "Thu",
+      thursday: "Thu",
+      fri: "Fri",
+      friday: "Fri",
+      sat: "Sat",
+      saturday: "Sat",
+      sun: "Sun",
+      sunday: "Sun"
     };
     const weekdayMatch = dateTime.date.match(
       /^(Mon(?:day)?|Tue(?:sday)?|Wed(?:nesday)?|Thu(?:rsday)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?),?\s+(.+)$/i
     );
     const weekday = weekdayMatch ? weekdayNames[weekdayMatch[1].toLowerCase()] : "";
     const datePart = weekdayMatch ? weekdayMatch[2] : dateTime.date;
-    const monthMatch = datePart.match(/^([A-Za-z]+)\s+(\d{1,2})(?:,?\s+(\d{4}))?$/);
-    if (monthMatch) {
-      const month = monthNames[monthMatch[1].toLowerCase()];
-      return appendDeadlineTime(formatDeadlineDatePart(month, monthMatch[2], monthMatch[3], weekday) || datePart, dateTime.time);
-    }
 
     const numericMatch = datePart.match(/^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?$/);
     if (numericMatch) {
-      const monthIndex = Number(numericMatch[1]) - 1;
+      const monthNumber = Number(numericMatch[1]);
       const day = Number(numericMatch[2]);
-      const date = new Date(2026, monthIndex, day);
-      if (!Number.isNaN(date.getTime())) {
-        const month = date.toLocaleDateString("en-US", { month: "short" });
-        return appendDeadlineTime(formatDeadlineDatePart(month, day, normalizeDeadlineYear(numericMatch[3]), weekday), dateTime.time);
-      }
+      const normalizedYear = normalizeDeadlineYear(numericMatch[3]);
+      const year = Number(normalizedYear || 2026);
+      if (!isValidCalendarDate(year, monthNumber, day)) return "";
+      const month = Object.keys(deadlineMonthNumbers)
+        .find((name) => deadlineMonthNumbers[name] === monthNumber);
+      return appendDeadlineTime(
+        formatDeadlineDatePart(month, day, normalizedYear, weekday),
+        dateTime.time
+      );
     }
 
     const isoMatch = datePart.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
     if (isoMatch) {
-      const date = new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
-      if (!Number.isNaN(date.getTime())) {
-        const month = date.toLocaleDateString("en-US", { month: "short" });
-        return appendDeadlineTime(formatDeadlineDatePart(month, isoMatch[3], isoMatch[1], weekday), dateTime.time);
-      }
+      const year = Number(isoMatch[1]);
+      const monthNumber = Number(isoMatch[2]);
+      const day = Number(isoMatch[3]);
+      if (!isValidCalendarDate(year, monthNumber, day)) return "";
+      const month = Object.keys(deadlineMonthNumbers)
+        .find((name) => deadlineMonthNumbers[name] === monthNumber);
+      return appendDeadlineTime(
+        formatDeadlineDatePart(month, day, isoMatch[1], weekday),
+        dateTime.time
+      );
     }
 
     return appendDeadlineTime(dateTime.date || source, dateTime.time);
+  }
+
+  function isValidCalendarDate(year, month, day) {
+    if (
+      !Number.isInteger(year) ||
+      !Number.isInteger(month) ||
+      !Number.isInteger(day) ||
+      year < 1 ||
+      month < 1 ||
+      month > 12 ||
+      day < 1
+    ) {
+      return false;
+    }
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day;
   }
 
   function normalizeDeadlineYear(year) {
@@ -1887,20 +2405,45 @@
   }
 
   function splitDeadlineDateTime(source) {
-    const match = normalizeText(source).match(/\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?$/i);
+    const normalized = normalizeText(source);
+    const match = normalized.match(
+      /\s+(?:at\s+)?(?:(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?|(\d{1,2}):(\d{2}))$/i
+    );
     if (!match) {
       return {
         date: source,
-        time: ""
+        time: "",
+        invalidTime: ""
       };
     }
 
-    const hour = Number(match[1]);
-    const minutes = match[2] || "00";
-    const period = match[3].toUpperCase() === "A" ? "AM" : "PM";
+    const amPm = Boolean(match[3]);
+    const hour = Number(amPm ? match[1] : match[4]);
+    const minuteValue = Number(
+      amPm ? match[2] || "00" : match[5]
+    );
+    const validHour = amPm
+      ? hour >= 1 && hour <= 12
+      : hour >= 0 && hour <= 23;
+    const validTime = validHour &&
+      minuteValue >= 0 && minuteValue <= 59;
+    const period = amPm
+      ? match[3].toUpperCase() === "A" ? "AM" : "PM"
+      : "";
+    const minutes = String(minuteValue).padStart(2, "0");
     return {
-      date: source.slice(0, match.index).replace(/\bat\s*$/i, "").replace(/,$/, "").trim(),
-      time: `${hour}:${minutes.padStart(2, "0")} ${period}`
+      date: normalized.slice(0, match.index)
+        .replace(/\bat\s*$/i, "")
+        .replace(/,$/, "")
+        .trim(),
+      time: validTime
+        ? amPm
+          ? `${hour}:${minutes} ${period}`
+          : `${String(hour).padStart(2, "0")}:${minutes}`
+        : "",
+      invalidTime: validTime
+        ? ""
+        : normalized.slice(match.index).trim()
     };
   }
 
@@ -1932,18 +2475,28 @@
     return "Course deadline";
   }
 
-  function analyzeSyllabus(text) {
+  function analyzeSyllabus(text, options = {}) {
     const source = String(text || "").trim();
-    const lines = source
+    const protectedSource = source.replace(
+      new RegExp(
+        `\\b(${monthNamePattern})\\.(?=\\s+\\d{1,4}\\b)`,
+        "gi"
+      ),
+      "$1\u0000"
+    );
+    const lines = protectedSource
       .split(/\r?\n|(?<=\.)\s+/)
-      .map((line) => normalizeText(line.replace(/^\s*[-*•]\s*/, "")))
+      .map((line) => normalizeText(
+        line.replace(/\u0000/g, ".").replace(/^\s*[-*•]\s*/, "")
+      ))
       .filter(Boolean);
+    const dateContext = academicDateContext(lines, options);
     const expression = new RegExp(
       `([A-Za-z0-9][A-Za-z0-9 /'-]{1,70}?)(?:\\s+(?:due|on|by)\\s+)(${monthPattern}\\s+\\d{1,2})`,
       "gi"
     );
-    const timePattern = "(?:\\s+(?:at\\s+)?\\d{1,2}(?::\\d{2})?\\s*(?:a\\.?m\\.?|p\\.?m\\.?))?";
-    const dateValuePattern = `${monthPattern}\\s+\\d{1,2}(?:,?\\s+\\d{4})?${timePattern}|\\d{1,2}[/-]\\d{1,2}(?:[/-]\\d{2,4})?${timePattern}|\\d{4}[/-]\\d{1,2}[/-]\\d{1,2}${timePattern}`;
+    const timePattern = "(?:\\s+(?:at\\s+)?(?:\\d{1,2}(?::\\d{2})?\\s*(?:a\\.?m\\.?|p\\.?m\\.?)|\\d{1,2}:\\d{2}))?";
+    const dateValuePattern = `(?:${monthPattern}\\s+\\d{1,2}(?:,?\\s+\\d{4})?${timePattern}|\\d{1,2}\\s+${monthPattern}(?:,?\\s+\\d{4})?${timePattern}|\\d{1,2}[/-]\\d{1,2}(?:[/-]\\d{2,4})?${timePattern}|\\d{4}[/-]\\d{1,2}[/-]\\d{1,2}${timePattern})`;
     const datePattern = `(${dateValuePattern})`;
     const weekdayPattern = "(?:(?:Mon|Monday|Tue|Tuesday|Wed|Wednesday|Thu|Thursday|Fri|Friday|Sat|Saturday|Sun|Sunday),?\\s+)?";
     const dueLineExpression = new RegExp(
@@ -1951,11 +2504,31 @@
       "i"
     );
     const deadlines = [];
+    const dateIssues = [];
     const seen = new Set();
-    const addDeadline = (label, date, type) => {
+    const seenIssues = new Set();
+    const addDeadline = (label, date, type, sourceLine = "") => {
       const cleanLabel = cleanDeadlineLabel(label);
       const cleanDate = normalizeText(date);
-      const canonicalDate = formatDeadlineDate(cleanDate);
+      const canonicalDate = formatDeadlineDate(cleanDate, dateContext);
+      const issueKind = isAmbiguousNumericDeadlineDate(cleanDate)
+        ? "ambiguous"
+        : canonicalDate
+          ? ""
+          : "invalid";
+      if (issueKind) {
+        const issueKey = `${issueKind}|${normalizeComparable(cleanLabel)}|${cleanDate.toLowerCase()}`;
+        if (!seenIssues.has(issueKey)) {
+          seenIssues.add(issueKey);
+          dateIssues.push({
+            kind: issueKind,
+            label: cleanLabel || "Course deadline",
+            value: cleanDate,
+            source: normalizeText(sourceLine) || `${cleanLabel} due ${cleanDate}`
+          });
+        }
+        return;
+      }
       const labelKey = normalizeComparable(cleanLabel);
       const dateBaseKey = deadlineDateBaseKey(canonicalDate);
       const existingIndex = deadlines.findIndex(
@@ -1986,7 +2559,10 @@
     while ((match = expression.exec(source)) !== null) {
       const label = cleanDeadlineLabel(match[1]);
       if (label) {
-        addDeadline(label, match[2], inferDeadlineType(label));
+        const sourceLine = lines.find((line) =>
+          normalizeComparable(line).includes(normalizeComparable(match[2]))
+        ) || match[0];
+        addDeadline(label, match[2], inferDeadlineType(label), sourceLine);
       }
     }
 
@@ -1994,7 +2570,7 @@
       const dueMatch = line.match(dueLineExpression);
       if (!dueMatch) return;
       const label = inferDeadlineLabel(dueMatch[1], lines, index);
-      addDeadline(label, dueMatch[2], inferDeadlineType(label));
+      addDeadline(label, dueMatch[2], inferDeadlineType(label), line);
     });
 
     const summary =
@@ -2005,11 +2581,21 @@
     return {
       summary,
       deadlines: deadlines.slice(0, 6),
+      dateIssues,
       nextAction:
         deadlines.length > 0
           ? `Start with ${deadlines[0].label} because it is the first visible deadline.`
           : "Paste copied class text with assignment names and due dates."
     };
+  }
+
+  function isAmbiguousNumericDeadlineDate(value) {
+    const dateTime = splitDeadlineDateTime(normalizeText(value));
+    const datePart = dateTime.date.replace(
+      /^(?:Mon(?:day)?|Tue(?:sday)?|Wed(?:nesday)?|Thu(?:rsday)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?),?\s+/i,
+      ""
+    );
+    return /^\d{1,2}[/-]\d{1,2}$/.test(datePart);
   }
 
   function refineCanvasDeadlines(deadlines = [], lines = [], sourceType = "Course material") {
@@ -2040,7 +2626,7 @@
     const value = normalizeText(date);
     let score = value.length;
     if (/\b\d{4}\b/.test(value)) score += 20;
-    if (/\b\d{1,2}:\d{2}\s*(AM|PM)\b/i.test(value)) score += 20;
+    if (/\b\d{1,2}:\d{2}(?:\s*(AM|PM))?\b/i.test(value)) score += 20;
     return score;
   }
 
@@ -2506,10 +3092,12 @@
     createCourseFromInput,
     createAssignmentFromDraft,
     groupAssignmentsByCategory,
+    hasMeaningfulScore,
     getActionAvailability,
     getCourseImportFileKind,
     mergeCourseDeadlines,
     normalizeCourseAssignments,
+    parseStructuredEnglishDate,
     removeCourseById,
     upsertCourseFromDraft,
     getBilingualExplanation

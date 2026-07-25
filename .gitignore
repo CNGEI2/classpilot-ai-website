@@ -4,4 +4,7 @@ site-dist/
 dist/
 .wrangler/
 .cache/
+.worktrees/
+.superpowers/
+docs/superpowers/
 npm-debug.log*

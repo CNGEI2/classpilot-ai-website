@@ -5,221 +5,236 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>ClassPilot AI</title>
     <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="styles.css?v=9">
-  <script src="logic.js?v=10" defer></script>
-  <script src="vendor/tesseract/tesseract.min.js" defer data-ocr-script></script>
-  <script src="app.js?v=10" defer></script>
+    <link rel="stylesheet" href="styles.css?v=14">
+    <script src="vendor/tesseract/tesseract.min.js?v=14" defer data-ocr-script></script>
+    <script src="logic.js?v=14" defer></script>
+    <script src="planner.js?v=14" defer></script>
+    <script src="file-readers.js?v=14" defer></script>
+    <script src="vendor/lucide/lucide.js?v=14" defer></script>
+    <script src="app.js?v=14" defer></script>
   </head>
   <body>
+    <a class="skip-link" href="#mainWorkspace">Skip to workspace</a>
     <div class="app-shell">
-      <aside class="sidebar" aria-label="Course navigation">
-        <div class="brand">
-          <div class="brand-mark" aria-hidden="true">CP</div>
-          <div>
-            <h1>ClassPilot AI</h1>
-            <p>Course-by-course planner</p>
+      <aside class="app-rail" aria-label="Workspace navigation">
+        <a class="brand" href="#today" aria-label="ClassPilot AI home">
+          <span class="brand-mark" aria-hidden="true">CP</span>
+          <span><strong>ClassPilot AI</strong><small>Private study workspace</small></span>
+        </a>
+        <nav id="appNav" class="primary-nav" aria-label="Primary">
+          <button type="button" data-view="today" aria-current="page" aria-label="Open Today" title="Open Today"><i data-lucide="circle-dot" aria-hidden="true"></i><span>Today</span></button>
+          <button type="button" data-view="courses" aria-label="Open Courses" title="Open Courses"><i data-lucide="book-open" aria-hidden="true"></i><span>Courses</span></button>
+          <button type="button" data-view="calendar" aria-label="Open Calendar" title="Open Calendar"><i data-lucide="calendar-days" aria-hidden="true"></i><span>Calendar</span></button>
+          <button type="button" data-view="data" aria-label="Open Data" title="Open Data"><i data-lucide="database" aria-hidden="true"></i><span>Data</span></button>
+        </nav>
+        <section class="rail-courses" aria-labelledby="courseListHeading">
+          <div class="rail-section-head">
+            <h2 id="courseListHeading">Courses</h2>
+            <button id="globalImportButton" type="button" aria-label="Import course material" title="Import course material"><i data-lucide="plus" aria-hidden="true"></i></button>
           </div>
-        </div>
-
-        <div class="sidebar-section">
-          <div class="section-label">Courses</div>
-          <div class="course-list" id="courseList"></div>
-        </div>
-
-        <form class="sidebar-section add-course" id="courseImportForm">
-          <div class="section-label">Course Import</div>
-          <label>
-            Paste syllabus, assignment text, or Canvas page text
-            <textarea id="courseMaterial" rows="8" placeholder="Upload each course syllabus separately. Then upload that course's assignment pages as they arrive."></textarea>
-          </label>
-          <label>
-            Or choose a text file or screenshot
-            <input type="file" id="courseFile" accept=".txt,.md,.csv,.png,.jpg,.jpeg,.webp,text/plain,text/markdown,text/csv,image/png,image/jpeg,image/webp">
-          </label>
-          <div class="screenshot-preview" id="screenshotPreviewCard" hidden>
-            <img id="screenshotPreview" alt="Uploaded course screenshot preview">
-            <div>
-              <strong>Screenshot OCR</strong>
-              <span id="screenshotPreviewMeta">Ready to read</span>
-              <span id="screenshotOcrProgress">Waiting</span>
-            </div>
-          </div>
-          <div class="import-review" id="importReviewCard" hidden>
-            <div class="review-head">
-              <strong>Review extracted info</strong>
-              <span>Edit anything OCR read incorrectly before saving.</span>
-            </div>
-            <div class="smart-readout" id="reviewSmartReadout" aria-live="polite"></div>
-            <div class="review-grid">
-              <label>
-                Course code
-                <input type="text" id="reviewCourseCode" autocomplete="off">
-              </label>
-              <label>
-                Due
-                <input type="text" id="reviewDueDate" autocomplete="off">
-              </label>
-            </div>
-            <label>
-              Course name
-              <input type="text" id="reviewCourseName" autocomplete="off">
-            </label>
-            <label>
-              Assignment
-              <input type="text" id="reviewAssignment" autocomplete="off">
-            </label>
-            <label>
-              Points
-              <input type="text" id="reviewPoints" autocomplete="off">
-            </label>
-            <label>
-              Links
-              <textarea id="reviewLinks" rows="2"></textarea>
-            </label>
-            <label>
-              Tasks
-              <textarea id="reviewTasks" rows="3"></textarea>
-            </label>
-            <details>
-              <summary>OCR text</summary>
-              <textarea id="reviewRawText" rows="5"></textarea>
-            </details>
-            <div class="review-actions">
-              <button class="primary-action" type="button" id="saveReviewCourse">Save course</button>
-              <button class="secondary-action" type="button" id="discardReviewCourse">Discard</button>
-            </div>
-          </div>
-          <button class="primary-action full-action" type="submit" id="buildCourseButton">Analyze upload</button>
-        </form>
-
-        <div class="sidebar-section term-card">
-          <div class="section-label">Term Pulse</div>
-          <div class="pulse-row">
-            <span>Upcoming</span>
-            <strong id="upcomingCount">0</strong>
-          </div>
-          <div class="pulse-row">
-            <span>Completed</span>
-            <strong id="completedCount">0</strong>
-          </div>
-          <div class="mini-map" id="miniMap" aria-label="Course workload map"></div>
-        </div>
+          <div id="courseList"></div>
+        </section>
       </aside>
 
-      <main class="workspace">
-        <header class="topbar">
+      <main id="mainWorkspace" class="workspace" tabindex="-1">
+        <header class="workspace-header">
           <div>
-            <div class="status-row">
-              <span class="live-dot" aria-hidden="true"></span>
-              <span>Personal academic workspace</span>
-            </div>
-            <h2 id="courseTitle">Course dashboard</h2>
-            <p id="courseSubtitle"></p>
+            <p id="viewEyebrow">Today</p>
+            <h1 id="viewTitle">Your next move</h1>
           </div>
-          <div class="top-actions" aria-label="Workspace actions">
-            <button class="icon-button" type="button" id="deleteCourse" aria-label="Delete selected course" title="Delete selected course">
-              <span aria-hidden="true">−</span>
-            </button>
-            <button class="icon-button" type="button" id="clearCourses" aria-label="Clear all data" title="Clear all data">
-              <span aria-hidden="true">×</span>
-            </button>
-          </div>
+          <button id="headerImportButton" type="button" aria-label="Import course material" title="Import course material"><i data-lucide="upload" aria-hidden="true"></i><span>Import</span></button>
         </header>
-
-        <div class="app-status is-info" id="appStatus" role="status" aria-live="polite">
-          Paste course material to build your first dashboard.
-        </div>
-
-        <section class="week-rail" aria-label="Deadline rail">
-          <div class="rail-header">
-            <div>
-              <span class="section-label">Week Rail</span>
-              <h3>Deadlines become next actions</h3>
-            </div>
-            <span class="rail-note" id="railNote">3 checkpoints</span>
-          </div>
-          <ol class="rail-track" id="weekRail"></ol>
+        <div id="appStatus" class="app-status" role="status" aria-live="polite"></div>
+        <section id="todayView" data-view-panel="today" aria-labelledby="viewTitle"></section>
+        <section id="coursesView" data-view-panel="courses" aria-label="Courses" hidden>
+          <div id="courseImportActions"></div>
+          <nav id="courseTabs" role="tablist" aria-label="Course sections"></nav>
+          <div id="courseWorkspace"></div>
         </section>
-
-        <section class="content-grid">
-          <article class="panel progress-panel">
-            <div class="panel-head">
-              <div>
-                <span class="section-label">Progress</span>
-                <h3>Course execution</h3>
-              </div>
-              <div class="progress-orb" id="progressOrb" aria-label="Course progress">0%</div>
+        <section id="calendarView" data-view-panel="calendar" aria-label="Calendar" hidden>
+          <div class="calendar-controls" role="group" aria-label="Calendar filters">
+            <label>Course
+              <select id="calendarCourseFilter" aria-label="Filter calendar by course"></select>
+            </label>
+            <label>Type
+              <select id="calendarTypeFilter" aria-label="Filter calendar by item type">
+                <option value="all">All items</option>
+                <option value="assignment">Assignments</option>
+                <option value="exam">Exams</option>
+              </select>
+            </label>
+            <div role="group" aria-label="Calendar month">
+              <button id="calendarPreviousMonth" type="button" data-calendar-month="previous" aria-label="Previous month" title="Previous month"><i data-lucide="chevron-left" aria-hidden="true"></i></button>
+              <strong id="calendarMonthLabel" aria-live="polite"></strong>
+              <button id="calendarNextMonth" type="button" data-calendar-month="next" aria-label="Next month" title="Next month"><i data-lucide="chevron-right" aria-hidden="true"></i></button>
             </div>
-            <p class="panel-copy" id="courseNotes"></p>
-            <div class="task-list" id="taskList"></div>
-            <form class="inline-form" id="taskForm">
-              <label>
-                New task
-                <input type="text" id="taskTitle" placeholder="Add a reading, homework, or review task" autocomplete="off">
-              </label>
-              <button class="secondary-action" type="submit" id="addTaskButton">Add task</button>
-            </form>
-          </article>
-
-          <article class="panel source-panel">
-            <div class="panel-head">
-              <div>
-                <span class="section-label">Source Check</span>
-                <h3>Trust before submit</h3>
-              </div>
-              <span class="confidence-pill" id="confidencePill">Grounded</span>
-            </div>
-            <div class="source-meter">
-              <span style="--value: 82%"></span>
-            </div>
-            <p id="sourceCheckText"></p>
-          </article>
-
-          <article class="panel wide-panel">
-            <div class="panel-head">
-              <div>
-                <span class="section-label">Course Directory</span>
-              <h3>One syllabus per course</h3>
-              </div>
-            </div>
-            <div class="result-strip" id="syllabusResult"></div>
-          </article>
-
-          <article class="panel wide-panel assignment-panel">
-            <div class="panel-head">
-              <div>
-                <span class="section-label">Assignment Workplan</span>
-                <h3>Requirements, deliverables, and steps</h3>
-              </div>
-            </div>
-            <div class="breakdown-grid" id="breakdownResult"></div>
-          </article>
-
-          <article class="panel planner-panel">
-            <div class="panel-head">
-              <div>
-                <span class="section-label">Exam Planner</span>
-                <h3>From the course directory</h3>
-              </div>
-            </div>
-            <div class="study-plan" id="studyPlan"></div>
-          </article>
-
-          <article class="panel coach-panel">
-            <div class="panel-head">
-              <div>
-                <span class="section-label">Assignment Coach</span>
-                <h3>Understand and finish</h3>
-              </div>
-              <div class="segmented" role="group" aria-label="Explanation language">
-                <button type="button" class="active" data-language="en">EN</button>
-                <button type="button" data-language="zh">中文</button>
-              </div>
-            </div>
-            <div class="coach-output" id="coachOutput"></div>
-          </article>
+            <button id="exportCalendar" type="button" aria-label="Download calendar as ICS" title="Download calendar as ICS"><i data-lucide="download" aria-hidden="true"></i><span>Download ICS</span></button>
+          </div>
+          <div id="calendarGrid" class="calendar-grid" role="group" aria-label="Calendar month"></div>
+          <section aria-labelledby="calendarAgendaHeading">
+            <h2 id="calendarAgendaHeading">Selected day</h2>
+            <div id="calendarAgenda" aria-live="polite"></div>
+          </section>
+          <section aria-labelledby="undatedItemsHeading">
+            <h2 id="undatedItemsHeading">Undated items</h2>
+            <div id="undatedItems" aria-live="polite"></div>
+          </section>
+        </section>
+        <section id="dataView" data-view-panel="data" aria-label="Data" hidden>
+          <p id="dataPrivacy" role="status">Your workspace stays in this browser until you export it.</p>
+          <p id="dataSummary"></p>
+          <p id="lastBackup"></p>
+          <div class="data-actions">
+            <button id="exportBackup" type="button" aria-label="Export workspace backup" title="Export workspace backup"><i data-lucide="download" aria-hidden="true"></i><span>Export backup</span></button>
+            <label>Import backup
+              <input id="importBackup" type="file" accept="application/json" aria-describedby="backupPreview">
+            </label>
+            <p id="backupPreview" role="status" aria-live="polite">Choose a backup to validate it before restoring.</p>
+            <button id="restoreBackup" type="button" disabled aria-label="Restore validated backup" title="Restore validated backup"><i data-lucide="upload" aria-hidden="true"></i><span>Restore backup</span></button>
+            <button id="clearWorkspace" type="button" aria-label="Clear workspace" title="Clear workspace"><i data-lucide="trash-2" aria-hidden="true"></i><span>Clear workspace</span></button>
+          </div>
         </section>
       </main>
+      <nav class="mobile-nav" aria-label="Mobile primary"></nav>
     </div>
+    <dialog id="importDialog" aria-labelledby="importDialogTitle">
+      <h2 id="importDialogTitle">Import course material</h2>
+      <form id="importForm">
+        <input id="courseId" type="hidden" name="courseId">
+        <div id="importDropZone" class="import-source">
+          <label>Choose PDF, image, or text file
+            <input id="importFile" name="importFile" type="file"
+              accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.md,.csv,application/pdf,image/png,image/jpeg,image/webp,text/plain,text/markdown,text/csv">
+          </label>
+          <label>Or paste course material
+            <textarea id="importText" name="importText"></textarea>
+          </label>
+          <p>Drop one supported file here.</p>
+        </div>
+        <ol id="importProgress" aria-label="Import progress">
+          <li data-import-stage="reading">Reading file</li>
+          <li data-import-stage="extracting">Extracting information</li>
+          <li data-import-stage="checking">Checking required fields</li>
+          <li data-import-stage="saved">Saved or needs review</li>
+        </ol>
+        <p id="importProgressDetail" role="status" aria-live="polite" aria-atomic="true"></p>
+        <section id="importReview" aria-labelledby="importReviewHeading" hidden>
+          <h3 id="importReviewHeading">Review imported details</h3>
+          <label>Course code
+            <input id="reviewCourseCode" name="reviewCourseCode">
+          </label>
+          <label>Course name
+            <input id="reviewCourseName" name="reviewCourseName">
+          </label>
+          <label>Material type
+            <select id="reviewMaterialType" name="reviewMaterialType">
+              <option value="Course material">Course material</option>
+              <option value="Syllabus or schedule">Syllabus or schedule</option>
+              <option value="Canvas assignment page">Canvas assignment page</option>
+              <option value="Canvas submitted assignment">Canvas submitted assignment</option>
+            </select>
+          </label>
+          <label>Assignment title
+            <input id="reviewAssignment" name="reviewAssignment">
+          </label>
+          <label>Due date and time
+            <input id="reviewDueDate" name="reviewDueDate">
+          </label>
+          <label>Points
+            <input id="reviewPoints" name="reviewPoints">
+          </label>
+          <label>Status
+            <select id="reviewStatus" name="reviewStatus">
+              <option value="assigned">Assigned</option>
+              <option value="submitted">Submitted</option>
+              <option value="late">Late</option>
+              <option value="graded">Graded</option>
+            </select>
+          </label>
+          <label>Links
+            <textarea id="reviewLinks" name="reviewLinks"></textarea>
+          </label>
+          <label>Requirements
+            <textarea id="reviewRequirements" name="reviewRequirements"></textarea>
+          </label>
+          <label>Deliverables
+            <textarea id="reviewDeliverables" name="reviewDeliverables"></textarea>
+          </label>
+          <label>Tasks
+            <textarea id="reviewTasks" name="reviewTasks"></textarea>
+          </label>
+          <label>Steps
+            <textarea id="reviewSteps" name="reviewSteps"></textarea>
+          </label>
+          <div id="reviewEvidence"></div>
+        </section>
+        <div class="dialog-actions">
+          <button type="button" id="cancelImport">Cancel</button>
+          <button type="submit" id="analyzeImport">Analyze upload</button>
+          <button type="button" id="saveImportReview" hidden>Save reviewed result</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="assignmentDialog" aria-labelledby="assignmentDialogTitle">
+      <h2 id="assignmentDialogTitle">Edit assignment</h2>
+      <form id="assignmentForm" method="dialog">
+        <input type="hidden" name="courseId">
+        <input type="hidden" name="assignmentId">
+        <label>Assignment name<input name="assignmentTitle" required></label>
+        <label>Due date and time<input name="assignmentDueDate"></label>
+        <label>Points<input name="assignmentPoints"></label>
+        <label>Status
+          <select name="assignmentStatus">
+            <option value="active">Active</option>
+            <option value="late">Late</option>
+            <option value="submitted">Submitted</option>
+            <option value="completed">Completed</option>
+            <option value="graded">Graded</option>
+          </select>
+        </label>
+        <label>Estimated minutes<input name="assignmentEstimate" type="number" min="15" step="15"></label>
+        <label>Requirements<textarea name="assignmentRequirements"></textarea></label>
+        <label>Deliverables<textarea name="assignmentDeliverables"></textarea></label>
+        <label>Completion steps<textarea name="assignmentSteps"></textarea></label>
+        <div class="dialog-actions">
+          <button type="button" data-dialog-close>Cancel</button>
+          <button type="submit">Save changes</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="taskDialog" aria-labelledby="taskDialogTitle">
+      <h2 id="taskDialogTitle">Edit checklist task</h2>
+      <form id="taskForm" method="dialog">
+        <input type="hidden" name="courseId">
+        <input type="hidden" name="assignmentId">
+        <input type="hidden" name="taskId">
+        <label>Task title<input name="taskTitle" required></label>
+        <div class="dialog-actions">
+          <button type="button" data-dialog-close>Cancel</button>
+          <button type="submit">Save task</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="coursePlanDialog" aria-labelledby="coursePlanDialogTitle">
+      <h2 id="coursePlanDialogTitle">Edit course details</h2>
+      <form id="coursePlanForm" method="dialog">
+        <input type="hidden" name="courseId">
+        <label>Course code<input name="courseCode" required></label>
+        <label>Course name<input name="courseName" required></label>
+        <label>Term<input name="coursePlanTerm"></label>
+        <label>Professor<input name="coursePlanProfessor"></label>
+        <label>Meeting<input name="coursePlanMeeting"></label>
+        <label>Office hours<input name="coursePlanOfficeHours"></label>
+        <label>Email<input name="coursePlanEmail" type="email"></label>
+        <div class="dialog-actions">
+          <button type="button" data-dialog-close>Cancel</button>
+          <button type="submit">Save course details</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="confirmationDialog" aria-labelledby="confirmationDialogTitle">
+      <h2 id="confirmationDialogTitle">Confirm action</h2>
+    </dialog>
+    <div id="undoToast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
   </body>
 </html>

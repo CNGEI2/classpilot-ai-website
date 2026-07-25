@@ -1,68 +1,48 @@
 # ClassPilot AI
 
-ClassPilot AI is a browser-based academic planning app for students. It imports syllabi, Canvas assignment pages, copied text, and screenshots, then organizes the work course by course.
+ClassPilot AI is a browser-based academic planning workspace. It turns course material into a private, editable view of what is due, what belongs to each course, when to work on it, and how to keep the data portable.
 
-Live site after GitHub Pages deployment:
+Live site: [https://cngei2.github.io/classpilot-ai-website/](https://cngei2.github.io/classpilot-ai-website/)
 
-```text
-https://cngei2.github.io/classpilot-ai-website/
-```
+## Product
 
-## What It Does
+ClassPilot has four views:
 
-- Creates a separate directory for each course.
-- Lets students upload each course syllabus separately.
-- Lets students upload assignments directly inside a selected course directory, so a syllabus and assignments from the same class stay together.
-- Reads Canvas assignment text for assignment title, due date, points, status, submission type, requirements, deliverables, links, and rubric signals.
-- Supports screenshot OCR through bundled Tesseract.js assets.
-- Builds assignment workplans with must-include requirements, deliverables, rubric signals, and step-by-step completion guidance.
-- Keeps exams and course-level policies under the course directory, not under individual assignments.
-- Includes an English/Chinese assignment coach that explains how to finish the selected assignment.
+- **Today** prioritizes the next action, upcoming work, this week's deadlines, and a compact Recently completed history.
+- **Courses** keeps syllabi, searchable and status-filtered assignments, requirements, deliverables, completion steps, and course guidance together.
+- **Calendar** combines assignment and exam dates, filters by course or item type, and exports visible dates as an ICS calendar file.
+- **Data** exports and restores complete JSON backups, reports the current schema, and lets the student explicitly clear local data.
 
-## How To Use
+Import PDF, PNG, JPEG, WebP, TXT, Markdown, CSV, or pasted text. PDF and image reading run in the browser, including local OCR for scanned pages. Imports are limited to 25 MB and PDFs to 40 pages.
 
-Open the live site in a browser.
+Start an import from a selected course to bind the result to that course. The review step lets the student correct extracted course or assignment details before saving. Students can edit assignments, checklist task titles, course identity, and syllabus details. They can also delete assignments, courses, or tasks and undo the most recent deletion until another successful workspace change occurs.
 
-1. Upload or paste a syllabus to create a course.
-2. Select that course in the course list.
-3. In the course directory, use **Upload into this course** for that course's syllabus updates, assignments, Canvas text, or screenshots.
-4. Review the extracted information if the app asks for confirmation.
-5. Use the assignment workplan and coach to understand what to submit and how to complete it.
+Today uses a deterministic planning score that combines overdue and remaining time, submitted or completed state, estimated remaining effort, points or weight, and missing required information. The interface translates the result into only **Do now**, **Do next**, or **Planned**; it never exposes the raw score.
+
+## Data And Privacy
+
+ClassPilot stores its workspace in this browser only. There is no account, backend, server-side AI processing, or transmission of course material to an application server.
+
+Export a JSON backup before changing browsers or clearing data. Restore deeply validates course, assignment, and task records before replacing the current workspace. Transient storage failures remain retryable, and restore or clear can recover from corrupt version 7 data. The current workspace uses schema version 7 and migrates the prior version 6 local course storage on first load while retaining the version 6 value as a recovery copy.
+
+This release does not provide notifications after the page closes, live cross-device synchronization, server AI, or direct Canvas login. It can parse uploaded or pasted Canvas content, but it does not sign in to Canvas or connect to a Canvas API.
 
 ## Local Development
 
-For text-only imports, opening `index.html` directly works in most browsers.
-
-For screenshot OCR, run a local server:
-
 ```bash
-./start.command
+npm ci
+npm run verify
+npm start
 ```
 
-Then open the printed local URL.
+Open [http://127.0.0.1:4173/](http://127.0.0.1:4173/) after starting the local server. A server is required for browser module and OCR workflows; opening `index.html` directly is not a supported verification path.
 
-## Test
+## Verification
 
 ```bash
 npm test
+npm run check
+npm run verify
 ```
 
-or:
-
-```bash
-node --test tests/logic.test.js
-```
-
-## GitHub Pages
-
-This repository includes a GitHub Actions workflow at `.github/workflows/pages.yml`.
-
-When the repository is pushed to `main`, the workflow:
-
-1. Runs the logic tests.
-2. Copies the static site files into a Pages artifact.
-3. Deploys the site to GitHub Pages.
-
-## Privacy
-
-ClassPilot AI runs in the browser. Course data is stored in the browser's local storage on the user's own device. Uploaded screenshots are processed in the browser with bundled OCR files; this project does not include a backend server.
+The GitHub Pages workflow runs `npm ci`, then `npm run verify`, and packages the exact static runtime files (`index.html`, `app.js`, `logic.js`, `planner.js`, `file-readers.js`, `styles.css`, `vendor/`, and `.nojekyll`) into a fresh Pages artifact on every deployment.
