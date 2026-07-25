@@ -353,6 +353,8 @@ test("extracts text from a valid in-memory PDF with the bundled PDF.js module", 
   const originalDOMMatrix = globalThis.DOMMatrix;
   const originalWorker = globalThis.pdfjsWorker;
   const originalWarn = console.warn;
+  const originalPromiseTry = Promise.try;
+  const originalToHex = Uint8Array.prototype.toHex;
   const expectedWarnings = [
     /Please use the `legacy` build in Node\.js environments\./,
     /Ensure that the `standardFontDataUrl` API parameter is provided\./
@@ -364,6 +366,17 @@ test("extracts text from a valid in-memory PDF with the bundled PDF.js module", 
     if (!expectedWarnings.some((pattern) => pattern.test(message))) originalWarn(...args);
   };
   globalThis.DOMMatrix = class DOMMatrix {};
+  if (typeof Promise.try !== "function") {
+    Promise.try = (callback, ...args) => Promise.resolve().then(() => callback(...args));
+  }
+  if (typeof Uint8Array.prototype.toHex !== "function") {
+    Object.defineProperty(Uint8Array.prototype, "toHex", {
+      configurable: true,
+      value() {
+        return Buffer.from(this.buffer, this.byteOffset, this.byteLength).toString("hex");
+      }
+    });
+  }
   const events = [];
   try {
     globalThis.pdfjsWorker = await import(pathToFileURL(
@@ -386,6 +399,8 @@ test("extracts text from a valid in-memory PDF with the bundled PDF.js module", 
     console.warn = originalWarn;
     globalThis.DOMMatrix = originalDOMMatrix;
     globalThis.pdfjsWorker = originalWorker;
+    if (originalPromiseTry === undefined) delete Promise.try;
+    if (originalToHex === undefined) delete Uint8Array.prototype.toHex;
   }
 });
 
