@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ClassPilot Canvas Companion</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main aria-labelledby="popupTitle">
+      <header>
+        <img src="icons/icon-32.png" width="32" height="32" alt="">
+        <div>
+          <p class="eyebrow">ClassPilot</p>
+          <h1 id="popupTitle">Canvas Companion</h1>
+        </div>
+      </header>
+
+      <p id="captureStatus" class="status" role="status" aria-live="polite">Reading this Canvas page...</p>
+
+      <section id="capturePreview" aria-label="Import preview" hidden>
+        <dl>
+          <div><dt>Course</dt><dd id="previewCourse"></dd></div>
+          <div><dt>Material</dt><dd id="previewType"></dd></div>
+          <div><dt>Title</dt><dd id="previewTitle"></dd></div>
+          <div><dt>Due</dt><dd id="previewDue"></dd></div>
+          <div><dt>Points</dt><dd id="previewPoints"></dd></div>
+        </dl>
+      </section>
+
+      <button id="sendCapture" type="button" disabled>Add to ClassPilot</button>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
