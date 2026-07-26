@@ -218,7 +218,7 @@ test("Workers AI mode falls back to trusted assignment evidence when the model o
     COACH_MODE: "workers_ai",
     AI: {
       async run(_model, options) {
-        assert.deepEqual(options.chat_template_kwargs, { thinking: false });
+        assert.equal(options.chat_template_kwargs, undefined);
         return {
           choices: [{ message: { content: JSON.stringify({
             answer: "Start by mapping the dilemma requirement to a scene.",

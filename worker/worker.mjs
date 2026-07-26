@@ -712,8 +712,7 @@ async function workersAiCoachResponse(payload, env) {
         messages,
         response_format: { type: "json_object" },
         max_completion_tokens: 1400,
-        temperature: 0.2,
-        chat_template_kwargs: { thinking: false }
+        temperature: 0.2
       }),
       timeoutPromise
     ]);
