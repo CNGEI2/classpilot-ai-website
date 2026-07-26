@@ -20,6 +20,34 @@ function cleanList(values, maxItems = 12, maxLength = 1200) {
     .slice(0, maxItems);
 }
 
+function cleanCoachList(values, maxItems = 8, maxLength = 600) {
+  return (Array.isArray(values) ? values : [])
+    .map((value) => {
+      if (!value || typeof value !== "object") return cleanText(value, maxLength);
+      const label = cleanText(
+        value.day || value.title || value.label || value.step || value.name,
+        Math.min(maxLength, 180)
+      );
+      const detailList = [value.tasks, value.actions, value.items, value.steps]
+        .find(Array.isArray);
+      const details = detailList
+        ? detailList.map((item) => cleanText(
+          typeof item === "object" && item
+            ? item.text || item.task || item.action || item.title || item.label
+            : item,
+          maxLength
+        )).filter(Boolean).join("; ")
+        : cleanText(
+          value.text || value.task || value.action || value.description || value.details,
+          maxLength
+        );
+      if (label && details) return cleanText(`${label}: ${details}`, maxLength);
+      return label || details;
+    })
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
 function cleanObjects(values, maxItems = 10) {
   return (Array.isArray(values) ? values : [])
     .map((item) => {
@@ -640,14 +668,14 @@ function normalizeLiveResponse(value, sources = []) {
       .slice(0, 2)
       .map(sourceCitation));
   }
-  const missingInformation = cleanList(parsed.missingInformation, 8, 600);
+  const missingInformation = cleanCoachList(parsed.missingInformation, 8, 600);
   if (!evidence.length && sources.length && missingInformation.length < 8) {
     missingInformation.push("No valid course-material citation was returned for this answer.");
   }
   return {
     answer,
     evidence,
-    nextSteps: cleanList(parsed.nextSteps, 8, 600),
+    nextSteps: cleanCoachList(parsed.nextSteps, 8, 600),
     missingInformation,
     usage: {
       inputTokens: Math.max(0, Math.floor(Number(

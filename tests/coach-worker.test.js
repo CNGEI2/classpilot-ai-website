@@ -268,6 +268,41 @@ test("Workers AI mode safely accepts a plain conversational answer when JSON for
   assert.deepEqual(value.nextSteps, []);
 });
 
+test("Workers AI mode flattens structured plan items into readable Coach steps", async () => {
+  const { handleCoachRequest } = await workerModule();
+  const response = await handleCoachRequest(request(), {
+    ...baseEnv,
+    COACH_MODE: "workers_ai",
+    AI: {
+      async run() {
+        return {
+          choices: [{ message: { content: JSON.stringify({
+            answer: "Use this three-day plan.",
+            evidence: [],
+            nextSteps: [
+              { day: "Day 1", tasks: ["Schedule interviews", "Prepare questions"] },
+              { day: "Day 2", action: "Collect and label notes" }
+            ],
+            missingInformation: [{ label: "Interview availability", text: "Confirm participant times" }]
+          }) } }],
+          usage: { prompt_tokens: 80, completion_tokens: 32 }
+        };
+      }
+    }
+  });
+  const value = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(value.nextSteps, [
+    "Day 1: Schedule interviews; Prepare questions",
+    "Day 2: Collect and label notes"
+  ]);
+  assert.deepEqual(value.missingInformation, [
+    "Interview availability: Confirm participant times"
+  ]);
+  assert.doesNotMatch(JSON.stringify(value), /\[object Object\]/);
+});
+
 test("live mode sends a hardened structured request and normalizes usage", async () => {
   const { handleCoachRequest } = await workerModule();
   let upstream;
