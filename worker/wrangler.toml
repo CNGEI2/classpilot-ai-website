@@ -7,3 +7,11 @@ ALLOWED_ORIGIN = "https://cngei2.github.io"
 COACH_MODE = "mock"
 OPENAI_MODEL = "gpt-5-mini"
 ENVIRONMENT = "production"
+CANVAS_ALLOWED_DOMAINS = "sfbu.instructure.com"
+CANVAS_CLIENT_ID = ""
+CANVAS_SCOPES = "url:GET|/api/v1/courses url:GET|/api/v1/courses/:course_id url:GET|/api/v1/courses/:course_id/assignments"
+
+# Add a CANVAS_SESSIONS KV binding after creating the namespace:
+# [[kv_namespaces]]
+# binding = "CANVAS_SESSIONS"
+# id = "replace_with_cloudflare_kv_namespace_id"

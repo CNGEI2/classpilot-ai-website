@@ -1,4 +1,4 @@
-# ClassPilot Coach Worker
+# ClassPilot Coach And Canvas Worker
 
 This Worker is the security boundary between the public GitHub Pages frontend and the OpenAI Responses API. It accepts only `POST /api/coach`, validates a bounded selected-course payload, applies origin and rate limits, and never returns secrets or raw upstream errors.
 
@@ -46,6 +46,32 @@ Then change `COACH_MODE` to `live`, deploy again, and confirm the Worker endpoin
 ```
 
 The endpoint uses the OpenAI Responses API with structured JSON output, low reasoning effort, a bounded output budget, and `store: false`.
+
+## Enable Read-Only Canvas Sync
+
+Canvas OAuth requires a Developer Key approved by the Canvas root-account administrator. Configure its redirect URI as:
+
+```text
+https://classpilot-ai-coach.cngei2-classpilot.workers.dev/api/canvas/callback
+```
+
+Limit the key to the read scopes in `wrangler.toml`: list courses, read one course, and list assignments. The Worker does not expose Canvas write routes.
+
+Create a KV namespace and add the returned namespace ID as the `CANVAS_SESSIONS` binding shown in `wrangler.toml`:
+
+```bash
+npx wrangler kv namespace create CANVAS_SESSIONS --config worker/wrangler.toml
+```
+
+Set the approved Client ID in `CANVAS_CLIENT_ID`, then store the Client Secret without committing it:
+
+```bash
+npx wrangler secret put CANVAS_CLIENT_SECRET --config worker/wrangler.toml
+```
+
+`CANVAS_ALLOWED_DOMAINS` is an exact comma-separated allowlist. OAuth state expires after ten minutes. Access and refresh tokens stay in Worker KV; the browser receives only an opaque ClassPilot session by an origin-checked `postMessage`. The frontend keeps that session in `sessionStorage`, not `localStorage`.
+
+Canvas' API policy permits manually generated tokens for testing only and requires multi-user applications to use OAuth. Do not add a token-paste field to the public product.
 
 ## Local Development
 

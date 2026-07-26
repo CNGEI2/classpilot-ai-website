@@ -35,6 +35,10 @@ const {
 } = window.ClassPilotSourceEvidence;
 const { analyzeSubmission } = window.ClassPilotSubmissionChecker;
 const {
+  mergeCanvasSnapshot,
+  normalizeCanvasDomain
+} = window.ClassPilotCanvasConnector;
+const {
   buildCoachContext,
   coachThreadKey,
   createThreadStore,
@@ -64,6 +68,12 @@ const coachEndpoint = document
 const coachMockMode = /(?:^|[?&])coach=mock(?:&|$)/i.test(
   String(window.location.search || "")
 );
+const canvasEndpoint = document
+  .querySelector('meta[name="classpilot-canvas-endpoint"]')
+  ?.getAttribute("content")
+  ?.trim()
+  ?.replace(/\/$/, "") || "";
+const CANVAS_SESSION_KEY = "classpilot-canvas-session";
 
 const elements = {
   appNav: document.querySelector("#appNav"),
@@ -72,6 +82,12 @@ const elements = {
   assignmentForm: document.querySelector("#assignmentForm"),
   backupPreview: document.querySelector("#backupPreview"),
   calendarView: document.querySelector("#calendarView"),
+  canvasConnect: document.querySelector("#canvasConnect"),
+  canvasConnectForm: document.querySelector("#canvasConnectForm"),
+  canvasDisconnect: document.querySelector("#canvasDisconnect"),
+  canvasDomain: document.querySelector("#canvasDomain"),
+  canvasStatus: document.querySelector("#canvasStatus"),
+  canvasSync: document.querySelector("#canvasSync"),
   calendarAgenda: document.querySelector("#calendarAgenda"),
   calendarCourseFilter: document.querySelector("#calendarCourseFilter"),
   calendarGrid: document.querySelector("#calendarGrid"),
@@ -124,6 +140,9 @@ const state = {
   activeView: "today",
   calendarCursor: new Date(),
   calendarTypeFilter: "all",
+  canvasBusy: false,
+  canvasConnected: false,
+  canvasDomain: "",
   assignmentFilters: new Map(),
   selectedCalendarDate: "",
   selectedAssignmentId: "",
@@ -1944,6 +1963,167 @@ function renderCalendar() {
   refreshIcons();
 }
 
+function storedCanvasSession() {
+  try {
+    return String(sessionStorage.getItem(CANVAS_SESSION_KEY) || "").trim();
+  } catch (_error) {
+    return "";
+  }
+}
+
+function storeCanvasSession(value) {
+  try {
+    if (value) sessionStorage.setItem(CANVAS_SESSION_KEY, value);
+    else sessionStorage.removeItem(CANVAS_SESSION_KEY);
+    return true;
+  } catch (_error) {
+    showStatus("Canvas session storage is unavailable in this browser.", "warn");
+    return false;
+  }
+}
+
+async function canvasRequest(path, options = {}) {
+  if (!canvasEndpoint) throw new Error("Canvas connection is not configured.");
+  const sessionId = options.session === false ? "" : storedCanvasSession();
+  const response = await fetch(canvasEndpoint + path, {
+    method: options.method || "GET",
+    headers: sessionId ? { Authorization: "Bearer " + sessionId } : {}
+  });
+  let value;
+  try {
+    value = await response.json();
+  } catch (_error) {
+    throw new Error("Canvas returned an unreadable response.");
+  }
+  if (!response.ok) {
+    if (response.status === 401) {
+      storeCanvasSession("");
+      state.canvasConnected = false;
+      state.canvasDomain = "";
+    }
+    throw new Error(value.message || "Canvas could not complete this request.");
+  }
+  return value;
+}
+
+function renderCanvasConnection() {
+  if (!elements.canvasConnectForm) return;
+  elements.canvasConnectForm.hidden = state.canvasConnected;
+  elements.canvasSync.hidden = !state.canvasConnected;
+  elements.canvasDisconnect.hidden = !state.canvasConnected;
+  elements.canvasConnect.disabled = state.canvasBusy;
+  elements.canvasDomain.disabled = state.canvasBusy;
+  elements.canvasSync.disabled = state.canvasBusy;
+  elements.canvasDisconnect.disabled = state.canvasBusy;
+  elements.canvasStatus.textContent = state.canvasBusy
+    ? "Canvas sync in progress..."
+    : state.canvasConnected
+      ? "Connected to " + state.canvasDomain + "."
+      : "Canvas is not connected.";
+}
+
+async function syncCanvas() {
+  if (!storedCanvasSession()) return false;
+  state.canvasBusy = true;
+  renderCanvasConnection();
+  showStatus("Syncing courses and assignments from Canvas...");
+  try {
+    const snapshot = await canvasRequest("/snapshot");
+    const nextWorkspace = mergeCanvasSnapshot(workspace, snapshot);
+    state.canvasConnected = true;
+    state.canvasDomain = snapshot.domain;
+    if (!commitWorkspace(nextWorkspace)) return false;
+    renderCanvasConnection();
+    showStatus(
+      "Canvas sync complete: " + snapshot.courses.length + " course" +
+        (snapshot.courses.length === 1 ? "" : "s") + " updated.",
+      "success"
+    );
+    return true;
+  } catch (error) {
+    showStatus(error.message || "Canvas sync failed.", "warn");
+    return false;
+  } finally {
+    state.canvasBusy = false;
+    renderCanvasConnection();
+  }
+}
+
+async function connectCanvas(event) {
+  event.preventDefault();
+  const domain = normalizeCanvasDomain(elements.canvasDomain.value);
+  if (!domain) {
+    showStatus("Enter a valid HTTPS Canvas school hostname.", "warn");
+    elements.canvasDomain.focus();
+    return false;
+  }
+  state.canvasBusy = true;
+  renderCanvasConnection();
+  try {
+    const value = await canvasRequest(
+      "/connect?domain=" + encodeURIComponent(domain),
+      { session: false }
+    );
+    const popup = window.open(
+      value.authorizeUrl,
+      "classpilot-canvas-oauth",
+      "popup,width=720,height=760"
+    );
+    if (!popup) throw new Error("Allow the Canvas sign-in popup, then try again.");
+    showStatus("Complete Canvas authorization in the sign-in window.");
+    return true;
+  } catch (error) {
+    showStatus(error.message || "Canvas connection could not start.", "warn");
+    return false;
+  } finally {
+    state.canvasBusy = false;
+    renderCanvasConnection();
+  }
+}
+
+async function disconnectCanvas() {
+  state.canvasBusy = true;
+  renderCanvasConnection();
+  try {
+    if (storedCanvasSession()) await canvasRequest("/disconnect", { method: "POST" });
+  } catch (_error) {
+    // Local disconnect still removes the browser session.
+  }
+  storeCanvasSession("");
+  state.canvasConnected = false;
+  state.canvasDomain = "";
+  state.canvasBusy = false;
+  renderCanvasConnection();
+  showStatus("Canvas disconnected.", "success");
+}
+
+async function refreshCanvasStatus() {
+  if (!storedCanvasSession()) {
+    renderCanvasConnection();
+    return false;
+  }
+  try {
+    const status = await canvasRequest("/status");
+    state.canvasConnected = Boolean(status.connected);
+    state.canvasDomain = status.domain || "";
+    renderCanvasConnection();
+    return state.canvasConnected;
+  } catch (error) {
+    renderCanvasConnection();
+    showStatus(error.message, "warn");
+    return false;
+  }
+}
+
+async function handleCanvasMessage(event) {
+  if (!canvasEndpoint || event.origin !== new URL(canvasEndpoint).origin) return false;
+  if (event.data?.type !== "classpilot-canvas-session" ||
+      !/^[a-zA-Z0-9._:-]{8,200}$/.test(String(event.data.sessionId || ""))) return false;
+  if (!storeCanvasSession(event.data.sessionId)) return false;
+  state.canvasConnected = true;
+  return syncCanvas();
+}
+
 function renderDataView() {
   const assignmentCount = workspace.courses.reduce(
     (total, course) => total + (course.assignments || []).length,
@@ -1955,6 +2135,7 @@ function renderDataView() {
     ? "Last backup: " + new Date(workspace.metadata.lastBackupAt).toLocaleString()
     : "No backup exported yet.";
   elements.restoreBackup.disabled = !pendingBackup;
+  renderCanvasConnection();
 }
 
 function renderData() {
@@ -3607,6 +3788,7 @@ function initialize() {
   if (state.storageAvailable) {
     showStatus("Workspace ready. Your course data stays in this browser.");
   }
+  void refreshCanvasStatus();
 }
 
 document.addEventListener("click", handleDocumentClick);
@@ -3647,6 +3829,9 @@ elements.calendarTypeFilter.addEventListener("change", () => {
   renderCalendar();
 });
 elements.exportCalendar.addEventListener("click", downloadCalendar);
+elements.canvasConnectForm.addEventListener("submit", connectCanvas);
+elements.canvasSync.addEventListener("click", () => { void syncCanvas(); });
+elements.canvasDisconnect.addEventListener("click", () => { void disconnectCanvas(); });
 elements.exportBackup.addEventListener("click", downloadBackup);
 elements.importBackup.addEventListener("change", handleBackupFileChange);
 elements.restoreBackup.addEventListener("click", restoreBackup);
@@ -3682,5 +3867,6 @@ elements.confirmationDialog.addEventListener("cancel", () => {
 });
 elements.courseTabs.addEventListener("keydown", handleCourseTabKeydown);
 window.addEventListener("hashchange", handleHistoryRoute);
+window.addEventListener("message", handleCanvasMessage);
 
 initialize();

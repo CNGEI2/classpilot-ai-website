@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="classpilot-coach-endpoint" content="https://classpilot-ai-coach.cngei2-classpilot.workers.dev/api/coach">
+    <meta name="classpilot-canvas-endpoint" content="https://classpilot-ai-coach.cngei2-classpilot.workers.dev/api/canvas">
     <title>ClassPilot AI</title>
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="styles.css?v=16">
@@ -15,6 +16,7 @@
     <script src="file-readers.js?v=16" defer></script>
     <script src="source-evidence.js?v=17" defer></script>
     <script src="submission-checker.js?v=17" defer></script>
+    <script src="canvas-connector.js?v=17" defer></script>
     <script src="coach.js?v=16" defer></script>
     <script src="vendor/lucide/lucide.js?v=16" defer></script>
     <script src="app.js?v=16" defer></script>
@@ -91,6 +93,20 @@
           <p id="dataPrivacy" role="status">Your workspace stays in this browser until you export it.</p>
           <p id="dataSummary"></p>
           <p id="lastBackup"></p>
+          <section class="canvas-connection" aria-labelledby="canvasConnectionHeading">
+            <h2 id="canvasConnectionHeading">Canvas</h2>
+            <form id="canvasConnectForm">
+              <label>School Canvas URL
+                <input id="canvasDomain" name="canvasDomain" type="text" inputmode="url" placeholder="school.instructure.com" autocomplete="url">
+              </label>
+              <button id="canvasConnect" type="submit" class="primary-action" aria-label="Connect Canvas" title="Connect Canvas"><i data-lucide="link" aria-hidden="true"></i><span>Connect Canvas</span></button>
+            </form>
+            <p id="canvasStatus" role="status" aria-live="polite">Canvas is not connected.</p>
+            <div class="canvas-actions">
+              <button id="canvasSync" type="button" hidden aria-label="Sync Canvas now" title="Sync Canvas now"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>Sync now</span></button>
+              <button id="canvasDisconnect" type="button" hidden>Disconnect</button>
+            </div>
+          </section>
           <div class="data-actions">
             <button id="exportBackup" type="button" aria-label="Export workspace backup" title="Export workspace backup"><i data-lucide="download" aria-hidden="true"></i><span>Export backup</span></button>
             <label>Import backup

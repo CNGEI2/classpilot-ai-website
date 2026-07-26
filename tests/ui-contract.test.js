@@ -9,6 +9,7 @@ const submissionChecker = require("../submission-checker.js");
 const logic = require("../logic.js");
 const planner = require("../planner.js");
 const studyScheduler = require("../study-scheduler.js");
+const canvasConnector = require("../canvas-connector.js");
 
 const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const appSource = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
@@ -268,6 +269,12 @@ class FakeDocument {
       "taskDialog",
       "taskForm",
       "calendarView",
+      "canvasConnect",
+      "canvasConnectForm",
+      "canvasDisconnect",
+      "canvasDomain",
+      "canvasStatus",
+      "canvasSync",
       "calendarGrid",
       "calendarAgenda",
       "calendarCourseFilter",
@@ -365,6 +372,9 @@ class FakeDocument {
 
   querySelector(selector) {
     if (selector === ".mobile-nav") return this.mobileNav;
+    if (selector === 'meta[name="classpilot-canvas-endpoint"]') {
+      return { getAttribute: () => "https://coach.example.workers.dev/api/canvas" };
+    }
     if (selector.startsWith("#")) return this.elements.get(selector.slice(1)) || null;
     return null;
   }
@@ -616,6 +626,9 @@ function runApp({
       return { kind: "text", text: await file.text(), pageCount: 0 };
     }
   },
+  fetchImpl = async () => {
+    throw new Error("Unexpected fetch in UI test.");
+  },
   tesseract,
   manualAnimationFrames = false
 } = {}) {
@@ -625,6 +638,7 @@ function runApp({
 
   const document = new FakeDocument();
   const localStorage = new FakeStorage(initial);
+  const sessionStorage = new FakeStorage();
   localStorage.failWrites = failWrites;
   const location = { hash, search };
   const listeners = {};
@@ -639,6 +653,16 @@ function runApp({
     dialogOpen: document.elements.get("importDialog").open,
     progress: document.elements.get("importProgressDetail").textContent
   });
+  class BrowserURL extends URL {}
+  BrowserURL.createObjectURL = (blob) => {
+    const url = "blob:classpilot-" + (blobUrls.length + 1);
+    blobUrls.push({ url, blob, revoked: false });
+    return url;
+  };
+  BrowserURL.revokeObjectURL = (url) => {
+    const entry = blobUrls.find((item) => item.url === url);
+    if (entry) entry.revoked = true;
+  };
   const fixedNow = now === undefined ? null : new Date(now).getTime();
   class FixedDate extends Date {
     constructor(...args) {
@@ -660,6 +684,7 @@ function runApp({
     ClassPilotLogic: logicApi,
     ClassPilotPlanner: planner,
     ClassPilotStudyScheduler: studyScheduler,
+    ClassPilotCanvasConnector: canvasConnector,
     console: {
       error: (...args) => errors.push(args),
       log: () => {},
@@ -679,6 +704,7 @@ function runApp({
       }
     },
     localStorage,
+    sessionStorage,
     location,
     lucide: { createIcons: () => {} },
     requestAnimationFrame: (callback) => {
@@ -703,17 +729,9 @@ function runApp({
       return timerId;
     },
     Tesseract: tesseract,
-    URL: {
-      createObjectURL: (blob) => {
-        const url = "blob:classpilot-" + (blobUrls.length + 1);
-        blobUrls.push({ url, blob, revoked: false });
-        return url;
-      },
-      revokeObjectURL: (url) => {
-        const entry = blobUrls.find((item) => item.url === url);
-        if (entry) entry.revoked = true;
-      }
-    },
+    fetch: fetchImpl,
+    open: () => ({}),
+    URL: BrowserURL,
     addEventListener: (type, handler) => {
       listeners[type] ||= [];
       listeners[type].push(handler);
@@ -733,6 +751,7 @@ function runApp({
     errors,
     listeners,
     localStorage,
+    sessionStorage,
     location,
     timers,
     advanceAnimationFrame() {
@@ -751,8 +770,8 @@ function runApp({
       timer.callback();
       return true;
     },
-    dispatchWindow(type) {
-      (listeners[type] || []).forEach((handler) => handler());
+    dispatchWindow(type, event = {}) {
+      return Promise.all((listeners[type] || []).map((handler) => handler(event)));
     }
   };
 }
@@ -2911,6 +2930,7 @@ test("loads local runtime dependencies before app.js", () => {
     "vendor/jszip/jszip.min.js",
     "file-readers.js",
     "submission-checker.js",
+    "canvas-connector.js",
     "vendor/lucide/lucide.js",
     "app.js"
   ].map((name) => html.indexOf(name));
@@ -3385,6 +3405,45 @@ test("Calendar exposes automatically replanned study sessions", async () => {
   assert.match(app.document.elements.get("calendarGrid").innerHTML, /Study: Satoshi Paper/);
   assert.match(app.document.elements.get("calendarAgenda").innerHTML, /Study: Satoshi Paper/);
   assert.doesNotMatch(app.document.elements.get("calendarAgenda").innerHTML, /assignment<\/span>/);
+});
+
+test("Canvas OAuth completion performs one read-only sync into stable course records", async () => {
+  const app = runApp({
+    workspaceRaw: JSON.stringify(createWorkspace([])),
+    fetchImpl: async (url, options) => {
+      assert.equal(String(url), "https://coach.example.workers.dev/api/canvas/snapshot");
+      assert.equal(options.method, "GET");
+      assert.equal(options.headers.Authorization, "Bearer session-12345");
+      return Response.json({
+        domain: "sfbu.instructure.com",
+        courses: [{
+          id: "1742",
+          course_code: "AI450-A",
+          name: "AI in Society",
+          term: { name: "Summer 2026" },
+          assignments: [{
+            id: "30244",
+            name: "Satoshi Paper",
+            due_at: "2026-07-28T22:00:00Z",
+            points_possible: 50,
+            description: "<ul><li>Submit a strategic analysis</li></ul>"
+          }]
+        }]
+      });
+    }
+  });
+
+  await app.dispatchWindow("message", {
+    origin: "https://coach.example.workers.dev",
+    data: { type: "classpilot-canvas-session", sessionId: "session-12345" }
+  });
+
+  const saved = persistedWorkspace(app);
+  assert.equal(saved.courses.length, 1);
+  assert.equal(saved.courses[0].source.canvasCourseId, "1742");
+  assert.equal(saved.courses[0].assignments[0].source.canvasAssignmentId, "30244");
+  assert.equal(app.sessionStorage.getItem("classpilot-canvas-session"), "session-12345");
+  assert.match(app.document.elements.get("canvasStatus").textContent, /Connected to sfbu\.instructure\.com/);
 });
 
 test("This week excludes overdue work while Today still shows it in Now", () => {

@@ -3,3 +3,6 @@ ALLOWED_ORIGIN=http://127.0.0.1:4173
 COACH_MODE=mock
 OPENAI_MODEL=gpt-5-mini
 ENVIRONMENT=development
+CANVAS_ALLOWED_DOMAINS=sfbu.instructure.com
+CANVAS_CLIENT_ID=add_school_approved_client_id
+CANVAS_CLIENT_SECRET=add_with_wrangler_secret

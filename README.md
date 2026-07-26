@@ -8,17 +8,25 @@ Live site: [https://cngei2.github.io/classpilot-ai-website/](https://cngei2.gith
 
 ClassPilot has four views:
 
-- **Today** prioritizes the next action, upcoming work, this week's deadlines, and a compact Recently completed history.
-- **Courses** keeps syllabi, searchable and status-filtered assignments, requirements, deliverables, completion steps, and course guidance together.
+- **Today** prioritizes the next action, starts a 25-minute focus session in one click, and automatically schedules remaining study blocks.
+- **Courses** keeps syllabi, searchable assignments, requirements, deliverables, completion steps, submission checks, and course guidance together.
 - **Conversational AI Coach** uses the selected course and assignment context for follow-up questions, requirement checks, and practical work plans. Each course and assignment keeps a separate browser-local conversation.
-- **Calendar** combines assignment and exam dates, filters by course or item type, and exports visible dates as an ICS calendar file.
-- **Data** exports and restores complete JSON backups, reports the current schema, and lets the student explicitly clear local data.
+- **Calendar** combines assignment, exam, and automatically replanned study-session dates and exports visible dates as an ICS file.
+- **Data** connects approved Canvas accounts, exports and restores JSON backups, and lets the student explicitly clear local data.
 
-Import PDF, PNG, JPEG, WebP, TXT, Markdown, CSV, or pasted text. PDF and image reading run in the browser, including local OCR for scanned pages. Imports are limited to 25 MB and PDFs to 40 pages.
+Import PDF, DOCX, PPTX, PNG, JPEG, WebP, TXT, Markdown, CSV, or pasted text. Document and image reading run in the browser, including local OCR for scanned pages. Imports are limited to 25 MB and PDFs to 40 pages.
 
 Start an import from a selected course to bind the result to that course. The review step lets the student correct extracted course or assignment details before saving. Students can edit assignments, checklist task titles, course identity, and syllabus details. They can also delete assignments, courses, or tasks and undo the most recent deletion until another successful workspace change occurs.
 
 Today uses a deterministic planning score that combines overdue and remaining time, submitted or completed state, estimated remaining effort, points or weight, and missing required information. The interface translates the result into only **Do now**, **Do next**, or **Planned**; it never exposes the raw score.
+
+Each assignment has a **Final check** file input. One upload checks file type, page or word constraints, deliverables, bibliography or primary-research markers, and rubric evidence. It returns a conservative **ClassPilot estimate** range. The AI-writing review is explicitly non-blocking and is never presented as proof of AI use. Raw submission text is not stored in the workspace.
+
+## Canvas Sync
+
+ClassPilot includes a read-only Canvas OAuth flow. After authorization, **Sync now** imports the student's active courses, syllabi, assignments, due dates, points, submission state, and allowed file types. Stable Canvas IDs keep repeated syncs in the same course and preserve completed ClassPilot tasks.
+
+Canvas tokens never enter the static site or `localStorage`. The Worker stores OAuth tokens in Cloudflare KV and gives the browser an opaque session kept in `sessionStorage`. The proxy exposes only fixed Canvas `GET` routes for courses and assignments. The public connection becomes active after SFBU approves a scoped Canvas Developer Key and its Client ID, Client Secret, and KV binding are configured on the Worker.
 
 ## AI Coach
 
@@ -32,11 +40,11 @@ For interface testing without an API key, open the site with `?coach=mock`. Mock
 
 ## Data And Privacy
 
-ClassPilot stores its workspace and Coach conversation history in this browser. OCR and PDF reading remain local. The selected course and assignment context is sent to the configured Coach backend only when the student sends a question; unrelated courses are excluded and complete raw uploads are not resent.
+ClassPilot stores its workspace and Coach conversation history in this browser. OCR, PDF, DOCX, PPTX, and submission-file reading remain local. The selected course and assignment context is sent to the configured Coach backend only when the student sends a question; unrelated courses are excluded and complete raw uploads are not resent.
 
 Export a JSON backup before changing browsers or clearing data. Restore deeply validates course, assignment, and task records before replacing the current workspace. Transient storage failures remain retryable, and restore or clear can recover from corrupt version 7 data. The current workspace uses schema version 7 and migrates the prior version 6 local course storage on first load while retaining the version 6 value as a recovery copy.
 
-This release does not provide notifications after the page closes, live cross-device synchronization, or direct Canvas login. It can parse uploaded or pasted Canvas content, but it does not sign in to Canvas or connect to a Canvas API. Live Coach responses require the separately deployed Worker and a server-side OpenAI API key.
+This release does not provide notifications after the page closes or live cross-device synchronization. Live Coach responses require a server-side OpenAI API key. Live Canvas sync requires a school-approved Canvas Developer Key; the product returns a clear configuration status until that approval is installed.
 
 ## Local Development
 
@@ -56,6 +64,6 @@ npm run check
 npm run verify
 ```
 
-The GitHub Pages workflow runs `npm ci`, then `npm run verify`, and packages the exact static runtime files (`index.html`, `app.js`, `logic.js`, `planner.js`, `file-readers.js`, `source-evidence.js`, `coach.js`, `styles.css`, `vendor/`, and `.nojekyll`) into a fresh Pages artifact on every deployment.
+The GitHub Pages workflow runs `npm ci`, then `npm run verify`, and packages the exact static runtime files, local readers, planning modules, Coach and Canvas connectors, styles, and vendored browser dependencies into a fresh Pages artifact on every deployment.
 
 See [`worker/README.md`](worker/README.md) for secure Coach backend deployment and live-mode configuration.

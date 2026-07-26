@@ -184,6 +184,305 @@ function publicError(code, message, status) {
   return error;
 }
 
+function canvasCorsHeaders(origin) {
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin"
+  };
+}
+
+function canvasJsonResponse(value, status, origin = "") {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+      ...(origin ? canvasCorsHeaders(origin) : {})
+    }
+  });
+}
+
+function canvasDomain(value) {
+  const source = String(value || "").trim().toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(source) || !source.includes(".")) return "";
+  return source;
+}
+
+function canvasAllowedDomains(env) {
+  return String(env.CANVAS_ALLOWED_DOMAINS || "")
+    .split(",")
+    .map(canvasDomain)
+    .filter(Boolean);
+}
+
+function canvasConfiguration(env) {
+  if (!env.CANVAS_SESSIONS || typeof env.CANVAS_SESSIONS.get !== "function" ||
+      !cleanText(env.CANVAS_CLIENT_ID, 300) || !cleanText(env.CANVAS_CLIENT_SECRET, 1000)) {
+    throw publicError(
+      "canvas_not_configured",
+      "Canvas connection is waiting for an approved school Developer Key.",
+      503
+    );
+  }
+}
+
+function canvasUuid(runtime) {
+  return typeof runtime.randomUUID === "function"
+    ? runtime.randomUUID()
+    : crypto.randomUUID();
+}
+
+function canvasCallbackUrl(request) {
+  const url = new URL(request.url);
+  return `${url.origin}/api/canvas/callback`;
+}
+
+function canvasScopes(env) {
+  return cleanText(env.CANVAS_SCOPES, 2000) || [
+    "url:GET|/api/v1/courses",
+    "url:GET|/api/v1/courses/:course_id",
+    "url:GET|/api/v1/courses/:course_id/assignments"
+  ].join(" ");
+}
+
+async function canvasConnect(request, env, runtime, origin) {
+  canvasConfiguration(env);
+  const domain = canvasDomain(new URL(request.url).searchParams.get("domain"));
+  if (!domain || !canvasAllowedDomains(env).includes(domain)) {
+    throw publicError("canvas_domain_not_allowed", "This Canvas school is not enabled for ClassPilot.", 400);
+  }
+  const state = canvasUuid(runtime);
+  await env.CANVAS_SESSIONS.put(`canvas-state:${state}`, JSON.stringify({
+    domain,
+    origin,
+    createdAt: Date.now()
+  }), { expirationTtl: 600 });
+  const authorize = new URL(`https://${domain}/login/oauth2/auth`);
+  authorize.searchParams.set("client_id", cleanText(env.CANVAS_CLIENT_ID, 300));
+  authorize.searchParams.set("response_type", "code");
+  authorize.searchParams.set("redirect_uri", canvasCallbackUrl(request));
+  authorize.searchParams.set("state", state);
+  authorize.searchParams.set("scope", canvasScopes(env));
+  return canvasJsonResponse({ authorizeUrl: authorize.toString() }, 200, origin);
+}
+
+async function canvasTokenRequest(domain, values, env, runtime) {
+  const fetchImpl = runtime.fetchImpl || fetch;
+  const body = new URLSearchParams({
+    ...values,
+    client_id: cleanText(env.CANVAS_CLIENT_ID, 300),
+    client_secret: cleanText(env.CANVAS_CLIENT_SECRET, 1000)
+  });
+  const response = await fetchImpl(`https://${domain}/login/oauth2/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body
+  });
+  if (!response.ok) throw publicError("canvas_oauth_failed", "Canvas authorization could not be completed.", 502);
+  const value = await response.json();
+  if (!cleanText(value.access_token, 4000)) {
+    throw publicError("canvas_oauth_failed", "Canvas did not return a valid access token.", 502);
+  }
+  return value;
+}
+
+function canvasCallbackHtml(origin, sessionId) {
+  const payload = JSON.stringify({ type: "classpilot-canvas-session", sessionId })
+    .replace(/</g, "\\u003c");
+  const target = JSON.stringify(origin).replace(/</g, "\\u003c");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Canvas connected</title></head><body><p>Canvas connected. This window can close.</p><script>if(window.opener){window.opener.postMessage(${payload},${target});}window.close();<\/script></body></html>`;
+}
+
+async function canvasCallback(request, env, runtime) {
+  canvasConfiguration(env);
+  const url = new URL(request.url);
+  const state = cleanId(url.searchParams.get("state"));
+  const code = cleanText(url.searchParams.get("code"), 2000);
+  const rawState = await env.CANVAS_SESSIONS.get(`canvas-state:${state}`);
+  if (!rawState || !code) throw publicError("canvas_oauth_invalid", "Canvas authorization expired or was denied.", 400);
+  await env.CANVAS_SESSIONS.delete(`canvas-state:${state}`);
+  let savedState;
+  try {
+    savedState = JSON.parse(rawState);
+  } catch (_error) {
+    throw publicError("canvas_oauth_invalid", "Canvas authorization state is invalid.", 400);
+  }
+  const domain = canvasDomain(savedState.domain);
+  const origin = cleanText(savedState.origin, 1000);
+  if (!domain || !canvasAllowedDomains(env).includes(domain) ||
+      !String(env.ALLOWED_ORIGIN || "").split(",").map((item) => item.trim().replace(/\/$/, "")).includes(origin)) {
+    throw publicError("canvas_oauth_invalid", "Canvas authorization state is invalid.", 400);
+  }
+  const token = await canvasTokenRequest(domain, {
+    grant_type: "authorization_code",
+    redirect_uri: canvasCallbackUrl(request),
+    code
+  }, env, runtime);
+  const sessionId = canvasUuid(runtime);
+  await env.CANVAS_SESSIONS.put(`canvas-session:${sessionId}`, JSON.stringify({
+    domain,
+    accessToken: cleanText(token.access_token, 4000),
+    refreshToken: cleanText(token.refresh_token, 4000),
+    expiresAt: Date.now() + Math.max(300, Number(token.expires_in) || 3600) * 1000
+  }), { expirationTtl: 60 * 60 * 24 * 30 });
+  return new Response(canvasCallbackHtml(origin, sessionId), {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": `default-src 'none'; script-src 'unsafe-inline'; style-src 'none'; frame-ancestors 'none'; base-uri 'none'`,
+      "Referrer-Policy": "no-referrer",
+      "X-Content-Type-Options": "nosniff"
+    }
+  });
+}
+
+function canvasSessionId(request) {
+  const match = String(request.headers.get("Authorization") || "").match(/^Bearer\s+([a-zA-Z0-9._:-]{8,200})$/);
+  return match ? match[1] : "";
+}
+
+async function canvasSession(request, env, runtime) {
+  canvasConfiguration(env);
+  const sessionId = canvasSessionId(request);
+  const raw = sessionId && await env.CANVAS_SESSIONS.get(`canvas-session:${sessionId}`);
+  if (!raw) throw publicError("canvas_session_expired", "Reconnect Canvas to continue.", 401);
+  let session;
+  try {
+    session = JSON.parse(raw);
+  } catch (_error) {
+    throw publicError("canvas_session_expired", "Reconnect Canvas to continue.", 401);
+  }
+  if (Number(session.expiresAt) <= Date.now() + 60000) {
+    if (!session.refreshToken) throw publicError("canvas_session_expired", "Reconnect Canvas to continue.", 401);
+    const token = await canvasTokenRequest(session.domain, {
+      grant_type: "refresh_token",
+      refresh_token: session.refreshToken
+    }, env, runtime);
+    session.accessToken = cleanText(token.access_token, 4000);
+    session.expiresAt = Date.now() + Math.max(300, Number(token.expires_in) || 3600) * 1000;
+    await env.CANVAS_SESSIONS.put(`canvas-session:${sessionId}`, JSON.stringify(session), {
+      expirationTtl: 60 * 60 * 24 * 30
+    });
+  }
+  return { sessionId, session };
+}
+
+async function canvasApiJson(session, pathname, runtime) {
+  const fetchImpl = runtime.fetchImpl || fetch;
+  const url = new URL(`https://${session.domain}${pathname}`);
+  const response = await fetchImpl(url.toString(), {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${session.accessToken}`,
+      Accept: "application/json+canvas-string-ids"
+    }
+  });
+  if (response.status === 401) throw publicError("canvas_session_expired", "Reconnect Canvas to continue.", 401);
+  if (!response.ok) throw publicError("canvas_upstream_error", "Canvas data could not be loaded right now.", 502);
+  return response.json();
+}
+
+function boundedCanvasHtml(value, maxLength = 100000) {
+  return String(value || "").slice(0, maxLength);
+}
+
+function canvasCourseRecord(course, details, assignments) {
+  return {
+    id: cleanText(course.id, 160),
+    course_code: cleanText(course.course_code, 240),
+    name: cleanText(course.name, 500),
+    term: details?.term && typeof details.term === "object"
+      ? { name: cleanText(details.term.name, 240) }
+      : null,
+    syllabus_body: boundedCanvasHtml(details?.syllabus_body),
+    assignments: (Array.isArray(assignments) ? assignments : []).slice(0, 250).map((assignment) => ({
+      id: cleanText(assignment.id, 160),
+      name: cleanText(assignment.name, 500),
+      due_at: cleanText(assignment.due_at, 160),
+      points_possible: Number.isFinite(Number(assignment.points_possible))
+        ? Number(assignment.points_possible)
+        : null,
+      html_url: cleanText(assignment.html_url, 2000),
+      description: boundedCanvasHtml(assignment.description, 60000),
+      allowed_extensions: cleanList(assignment.allowed_extensions, 20, 40),
+      submission_types: cleanList(assignment.submission_types, 20, 80),
+      submission: assignment.submission && typeof assignment.submission === "object" ? {
+        workflow_state: cleanText(assignment.submission.workflow_state, 80),
+        score: Number.isFinite(Number(assignment.submission.score))
+          ? Number(assignment.submission.score)
+          : null,
+        submitted_at: cleanText(assignment.submission.submitted_at, 160)
+      } : null
+    }))
+  };
+}
+
+async function canvasSnapshot(request, env, runtime, origin) {
+  const { session } = await canvasSession(request, env, runtime);
+  const courses = await canvasApiJson(
+    session,
+    "/api/v1/courses?enrollment_type=student&enrollment_state%5B%5D=active&per_page=100",
+    runtime
+  );
+  const records = await Promise.all((Array.isArray(courses) ? courses : []).slice(0, 20).map(async (course) => {
+    const courseId = encodeURIComponent(cleanText(course.id, 160));
+    const [details, assignments] = await Promise.all([
+      canvasApiJson(session, `/api/v1/courses/${courseId}?include%5B%5D=term&include%5B%5D=syllabus_body`, runtime),
+      canvasApiJson(session, `/api/v1/courses/${courseId}/assignments?include%5B%5D=submission&order_by=due_at&per_page=100`, runtime)
+    ]);
+    return canvasCourseRecord(course, details, assignments);
+  }));
+  return canvasJsonResponse({ domain: session.domain, courses: records }, 200, origin);
+}
+
+export async function handleCanvasRequest(request, env = {}, runtime = {}) {
+  const url = new URL(request.url);
+  if (!url.pathname.startsWith("/api/canvas/")) {
+    return canvasJsonResponse({ code: "not_found", message: "Not found." }, 404);
+  }
+  if (url.pathname === "/api/canvas/callback") {
+    try {
+      return await canvasCallback(request, env, runtime);
+    } catch (error) {
+      return canvasJsonResponse({
+        code: error?.publicCode || "internal_error",
+        message: error?.publicCode ? error.message : "Canvas authorization could not be completed."
+      }, error?.publicStatus || 500);
+    }
+  }
+  const origin = allowedOrigin(request, env);
+  if (!origin) return canvasJsonResponse({ code: "origin_forbidden", message: "This site is not allowed to use Canvas." }, 403);
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: canvasCorsHeaders(origin) });
+  try {
+    if (url.pathname === "/api/canvas/connect" && request.method === "GET") {
+      return await canvasConnect(request, env, runtime, origin);
+    }
+    if (url.pathname === "/api/canvas/snapshot" && request.method === "GET") {
+      return await canvasSnapshot(request, env, runtime, origin);
+    }
+    if (url.pathname === "/api/canvas/status" && request.method === "GET") {
+      const { session } = await canvasSession(request, env, runtime);
+      return canvasJsonResponse({ connected: true, domain: session.domain }, 200, origin);
+    }
+    if (url.pathname === "/api/canvas/disconnect" && request.method === "POST") {
+      const sessionId = canvasSessionId(request);
+      if (sessionId) await env.CANVAS_SESSIONS?.delete?.(`canvas-session:${sessionId}`);
+      return canvasJsonResponse({ connected: false }, 200, origin);
+    }
+    return canvasJsonResponse({ code: "method_not_allowed", message: "Unsupported Canvas operation." }, 405, origin);
+  } catch (error) {
+    return canvasJsonResponse({
+      code: error?.publicCode || "internal_error",
+      message: error?.publicCode ? error.message : "Canvas could not complete this request."
+    }, error?.publicStatus || 500, origin);
+  }
+}
+
 async function enforceRateLimit(request, env, runtime) {
   const key = cleanText(request.headers.get("CF-Connecting-IP") || "anonymous", 160);
   if (env.COACH_RATE_LIMITER && typeof env.COACH_RATE_LIMITER.limit === "function") {
@@ -446,6 +745,9 @@ export async function handleCoachRequest(request, env = {}, runtime = {}) {
 
 export default {
   fetch(request, env) {
-    return handleCoachRequest(request, env);
+    const pathname = new URL(request.url).pathname;
+    return pathname.startsWith("/api/canvas/")
+      ? handleCanvasRequest(request, env)
+      : handleCoachRequest(request, env);
   }
 };
