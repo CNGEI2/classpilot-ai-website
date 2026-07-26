@@ -140,6 +140,8 @@ let undoTimer;
 let pendingBackup;
 let backupPreviewOperation = 0;
 let clearWorkspaceConfirmationPending = false;
+let focusSession;
+let focusTimer;
 let coachThreadStore;
 let activeCoachRequest;
 const coachViewStates = new Map();
@@ -601,6 +603,11 @@ function renderFocusRail(queue) {
       '<section class="focus-group focus-now" aria-labelledby="nowHeading">' +
         '<h2 id="nowHeading">Now</h2>' +
         renderFocusItem(queue.now, "1") +
+        '<button type="button" class="primary-action start-focus" data-start-focus' +
+          ' data-course-id="' + escapeHtml(queue.now.courseId) + '"' +
+          ' data-assignment-id="' + escapeHtml(queue.now.id) + '">' +
+          '<i data-lucide="play" aria-hidden="true"></i><span>Start 25 min</span>' +
+        "</button>" +
       "</section>" +
       '<section class="focus-group" aria-labelledby="upNextHeading">' +
         '<h2 id="upNextHeading">Up next</h2>' +
@@ -616,6 +623,44 @@ function renderFocusRail(queue) {
       "</section>" +
       renderRecentlyCompleted(queue.recentlyCompleted) +
     "</div>"
+  );
+}
+
+function formatFocusClock(seconds) {
+  const value = Math.max(0, Math.floor(Number(seconds) || 0));
+  return String(Math.floor(value / 60)).padStart(2, "0") + ":" +
+    String(value % 60).padStart(2, "0");
+}
+
+function renderFocusSession() {
+  const assignment = findAssignment(focusSession.courseId, focusSession.assignmentId);
+  const course = workspace.courses.find((item) => item.id === focusSession.courseId);
+  if (!assignment || !course) {
+    focusSession = undefined;
+    return "";
+  }
+  const remaining = Math.max(0, focusSession.durationSeconds - focusSession.elapsedSeconds);
+  return (
+    '<section class="focus-session" aria-labelledby="focusSessionHeading">' +
+      '<p class="assignment-kicker">' + escapeHtml(course.code || course.name || "Course") + "</p>" +
+      '<h2 id="focusSessionHeading">' + escapeHtml(assignment.title) + "</h2>" +
+      '<p class="focus-session-action"><span>Current step</span>' +
+        escapeHtml(focusSession.action) + "</p>" +
+      '<output class="focus-clock" aria-label="Time remaining">' +
+        escapeHtml(formatFocusClock(remaining)) + "</output>" +
+      '<div class="focus-session-controls">' +
+        '<button type="button" class="primary-action" data-focus-pause="' +
+          (focusSession.running ? "pause" : "resume") + '">' +
+          '<i data-lucide="' + (focusSession.running ? "pause" : "play") +
+            '" aria-hidden="true"></i><span>' +
+          (focusSession.running ? "Pause" : "Resume") + "</span></button>" +
+        (focusSession.taskId
+          ? '<button type="button" data-focus-complete><i data-lucide="check" aria-hidden="true"></i>' +
+              "<span>Complete step</span></button>"
+          : "") +
+        '<button type="button" data-focus-end>End session</button>' +
+      "</div>" +
+    "</section>"
   );
 }
 
@@ -647,6 +692,14 @@ function upcomingThisWeek(items, now) {
 }
 
 function renderToday() {
+  if (focusSession) {
+    const sessionMarkup = renderFocusSession();
+    if (sessionMarkup) {
+      elements.todayView.innerHTML = sessionMarkup;
+      refreshIcons();
+      return;
+    }
+  }
   const now = new Date();
   const queue = buildTodayQueue(workspace, now);
   queue.thisWeek = upcomingThisWeek(queue.thisWeek, now);
@@ -654,6 +707,85 @@ function renderToday() {
     ? renderFocusRail(queue)
     : renderEmptyToday() + renderRecentlyCompleted(queue.recentlyCompleted);
   refreshIcons();
+}
+
+function clearFocusTimer() {
+  clearTimeout(focusTimer);
+  focusTimer = undefined;
+}
+
+function scheduleFocusTick() {
+  clearFocusTimer();
+  if (!focusSession?.running) return;
+  focusTimer = setTimeout(() => {
+    if (!focusSession?.running) return;
+    const now = Date.now();
+    const delta = Math.max(1, Math.floor((now - focusSession.lastTickAt) / 1000));
+    focusSession.elapsedSeconds = Math.min(
+      focusSession.durationSeconds,
+      focusSession.elapsedSeconds + delta
+    );
+    focusSession.lastTickAt = now;
+    if (focusSession.elapsedSeconds >= focusSession.durationSeconds) {
+      focusSession.running = false;
+      showStatus("Focus session complete. Mark the step done or end the session.", "success");
+    }
+    renderToday();
+    scheduleFocusTick();
+  }, 1000);
+}
+
+function startFocusSession(courseId, assignmentId) {
+  const assignment = findAssignment(courseId, assignmentId);
+  if (!assignment) return false;
+  const task = (assignment.tasks || []).find((item) => !item.done);
+  focusSession = {
+    courseId,
+    assignmentId,
+    taskId: task?.id || "",
+    action: task?.title || assignment.nextAction || "Review the assignment requirements",
+    durationSeconds: 25 * 60,
+    elapsedSeconds: 0,
+    lastTickAt: Date.now(),
+    running: true
+  };
+  renderToday();
+  scheduleFocusTick();
+  showStatus("Focus session started for " + assignment.title + ".", "success");
+  return true;
+}
+
+function toggleFocusSession() {
+  if (!focusSession) return false;
+  if (focusSession.running) {
+    focusSession.running = false;
+    clearFocusTimer();
+    showStatus("Focus session paused.");
+  } else {
+    focusSession.running = true;
+    focusSession.lastTickAt = Date.now();
+    scheduleFocusTick();
+    showStatus("Focus session resumed.", "success");
+  }
+  renderToday();
+  return true;
+}
+
+function endFocusSession(message = "Focus session ended.") {
+  clearFocusTimer();
+  focusSession = undefined;
+  renderToday();
+  showStatus(message);
+}
+
+function completeFocusStep() {
+  if (!focusSession?.taskId) return false;
+  const { courseId, assignmentId, taskId } = focusSession;
+  clearFocusTimer();
+  focusSession = undefined;
+  const saved = setTaskCompletion(courseId, assignmentId, taskId, true);
+  if (saved) showStatus("Step completed. Today has selected the next action.", "success");
+  return saved;
 }
 
 function assignmentDetailItemText(item) {
@@ -3183,6 +3315,27 @@ function handleDocumentClick(event) {
 
   if (event.target.closest("[data-undo]")) {
     restoreUndo();
+    return;
+  }
+
+  const startFocus = event.target.closest("[data-start-focus]");
+  if (startFocus) {
+    startFocusSession(startFocus.dataset.courseId, startFocus.dataset.assignmentId);
+    return;
+  }
+
+  if (event.target.closest("[data-focus-pause]")) {
+    toggleFocusSession();
+    return;
+  }
+
+  if (event.target.closest("[data-focus-complete]")) {
+    completeFocusStep();
+    return;
+  }
+
+  if (event.target.closest("[data-focus-end]")) {
+    endFocusSession();
     return;
   }
 

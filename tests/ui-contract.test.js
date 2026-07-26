@@ -238,6 +238,14 @@ class FakeElement {
       this.dataset.coachStop !== undefined) return this;
     if (selector === "[data-coach-clear]" &&
       this.dataset.coachClear !== undefined) return this;
+    if (selector === "[data-start-focus]" &&
+      this.dataset.startFocus !== undefined) return this;
+    if (selector === "[data-focus-pause]" &&
+      this.dataset.focusPause !== undefined) return this;
+    if (selector === "[data-focus-end]" &&
+      this.dataset.focusEnd !== undefined) return this;
+    if (selector === "[data-focus-complete]" &&
+      this.dataset.focusComplete !== undefined) return this;
     if (selector === "[data-coach-language]" &&
       this.dataset.coachLanguage !== undefined) return this;
     return null;
@@ -3315,6 +3323,36 @@ test("a submission upload is checked once and saves only the compact report", as
   assert.equal(Object.hasOwn(saved, "text"), false);
   assert.equal(Object.hasOwn(saved.file, "text"), false);
   assert.match(app.document.elements.get("courseWorkspace").innerHTML, /ClassPilot estimate/);
+});
+
+test("Today starts a focused next-action session and completes its checklist task", () => {
+  const app = runApp({
+    workspaceRaw: JSON.stringify(createWorkspace([{
+      id: "course-1",
+      code: "AI450",
+      name: "AI in Society",
+      assignments: [{
+        id: "paper",
+        title: "Satoshi Paper",
+        dueAt: new Date(Date.now() + 86400000).toISOString(),
+        estimateMinutes: 90,
+        tasks: [{ id: "outline", title: "Draft the report outline", done: false }]
+      }]
+    }]))
+  });
+  const today = app.document.elements.get("todayView");
+  const start = today.children.find((control) => control.dataset.startFocus !== undefined);
+
+  app.document.dispatchClick(start);
+
+  assert.match(today.innerHTML, /class="focus-session"/);
+  assert.match(today.innerHTML, /25:00/);
+  assert.match(today.innerHTML, /Draft the report outline/);
+  const complete = today.children.find((control) => control.dataset.focusComplete !== undefined);
+  app.document.dispatchClick(complete);
+
+  assert.equal(persistedWorkspace(app).courses[0].assignments[0].tasks[0].done, true);
+  assert.doesNotMatch(today.innerHTML, /class="focus-session"/);
 });
 
 test("This week excludes overdue work while Today still shows it in Now", () => {

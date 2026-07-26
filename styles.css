@@ -589,6 +589,59 @@ h3 {
   border-bottom: 2px solid var(--ink);
 }
 
+.start-focus {
+  margin-top: 14px;
+}
+
+.focus-session {
+  display: grid;
+  width: min(100%, 760px);
+  min-height: min(620px, calc(100vh - 150px));
+  align-content: center;
+  justify-items: center;
+  margin: 0 auto;
+  padding: 32px 0;
+  text-align: center;
+}
+
+.focus-session h2 {
+  max-width: 650px;
+  margin: 5px 0 14px;
+  font-size: 1.8rem;
+}
+
+.focus-session-action {
+  display: grid;
+  gap: 4px;
+  max-width: 580px;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 1rem;
+}
+
+.focus-session-action > span {
+  color: var(--teal);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.focus-clock {
+  margin: 30px 0;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 6rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.focus-session-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
 .focus-position {
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -2019,6 +2072,10 @@ dialog form > div {
 @media (max-width: 620px) {
   h1 {
     font-size: 1.45rem;
+  }
+
+  .focus-clock {
+    font-size: 4rem;
   }
 
   .workspace-header {
