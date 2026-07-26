@@ -28,6 +28,29 @@ function validBody(overrides = {}) {
         completedSteps: ["Assign group roles"],
         remainingSteps: ["Draft the play"]
       },
+      sources: [
+        {
+          id: "assignment:future-care:requirement:1",
+          kind: "requirement",
+          title: "Requirement",
+          location: "Requirement 1",
+          text: "Include one ethical dilemma"
+        },
+        {
+          id: "assignment:future-care:requirement:2",
+          kind: "requirement",
+          title: "Requirement",
+          location: "Requirement 2",
+          text: "Include one possible solution"
+        },
+        {
+          id: "assignment:future-care:rubric:1",
+          kind: "rubric",
+          title: "Originality",
+          location: "Rubric criterion 1",
+          text: "35%: Show original judgment."
+        }
+      ],
       language: "en",
       action: "explain"
     },
@@ -108,7 +131,7 @@ test("mock mode returns labeled assignment-aware guidance and evidence", async (
   assert.equal(response.status, 200);
   assert.equal(value.mode, "mock");
   assert.match(value.answer, /Future care play/);
-  assert.ok(value.evidence.some((item) => /ethical dilemma/i.test(item.text)));
+  assert.ok(value.evidence.some((item) => /ethical dilemma/i.test(item.excerpt)));
   assert.ok(value.nextSteps.some((item) => /Draft the play/i.test(item)));
   assert.deepEqual(value.usage, { inputTokens: 0, outputTokens: 0 });
 });
@@ -148,7 +171,12 @@ test("live mode sends a hardened structured request and normalizes usage", async
               type: "output_text",
               text: JSON.stringify({
                 answer: "Map each requirement to one scene before drafting.",
-                evidence: [{ label: "Requirement", text: "Include one ethical dilemma" }],
+                evidence: [{
+                  sourceId: "assignment:future-care:requirement:1",
+                  label: "Requirement",
+                  excerpt: "Include one ethical dilemma",
+                  location: "Requirement 1"
+                }],
                 nextSteps: ["Draft the conflict scene"],
                 missingInformation: []
               })
@@ -172,6 +200,55 @@ test("live mode sends a hardened structured request and normalizes usage", async
   assert.equal(sent.reasoning.effort, "low");
   assert.equal(sent.text.format.type, "json_schema");
   assert.doesNotMatch(upstream.options.body, /secretInternalNote|Private other course/);
+});
+
+test("worker strips invented citations and preserves valid source references", async () => {
+  const { handleCoachRequest } = await workerModule();
+  const response = await handleCoachRequest(
+    request(),
+    {
+      ...baseEnv,
+      COACH_MODE: "live",
+      OPENAI_API_KEY: "test-key-not-real"
+    },
+    {
+      fetchImpl: async () => new Response(JSON.stringify({
+        output: [{
+          type: "message",
+          content: [{
+            type: "output_text",
+            text: JSON.stringify({
+              answer: "The ethical dilemma is required.",
+              evidence: [
+                {
+                  sourceId: "invented",
+                  label: "Wrong",
+                  excerpt: "Made up",
+                  location: "Unknown"
+                },
+                {
+                  sourceId: "assignment:future-care:requirement:1",
+                  label: "Requirement",
+                  excerpt: "Include one ethical dilemma",
+                  location: "Requirement 1"
+                }
+              ],
+              nextSteps: [],
+              missingInformation: []
+            })
+          }]
+        }],
+        usage: { input_tokens: 100, output_tokens: 40 }
+      }), { status: 200, headers: { "Content-Type": "application/json" } })
+    }
+  );
+  const value = await response.json();
+
+  assert.deepEqual(
+    value.evidence.map((item) => item.sourceId),
+    ["assignment:future-care:requirement:1"]
+  );
+  assert.equal(value.evidence[0].excerpt, "Include one ethical dilemma");
 });
 
 test("upstream failures never disclose keys, bodies, or stack traces", async () => {

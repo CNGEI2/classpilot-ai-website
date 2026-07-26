@@ -32,6 +32,36 @@ function cleanObjects(values, maxItems = 10) {
     .slice(0, maxItems);
 }
 
+function cleanId(value) {
+  return cleanText(value, 180).replace(/[^a-zA-Z0-9._:-]/g, "-") || "unknown";
+}
+
+function cleanSources(values, courseId, assignmentId) {
+  const coursePrefix = `course:${cleanId(courseId)}:`;
+  const assignmentPrefix = assignmentId ? `assignment:${cleanId(assignmentId)}:` : "";
+  const seen = new Set();
+  return (Array.isArray(values) ? values : [])
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const id = cleanId(item.id);
+      const belongsToContext = id.startsWith(coursePrefix) ||
+        (assignmentPrefix && id.startsWith(assignmentPrefix));
+      if (!belongsToContext || seen.has(id)) return null;
+      const source = {
+        id,
+        kind: cleanText(item.kind, 80),
+        title: cleanText(item.title, 240),
+        location: cleanText(item.location, 240),
+        text: cleanText(item.text, 1600)
+      };
+      if (!source.kind || !source.title || !source.text) return null;
+      seen.add(id);
+      return source;
+    })
+    .filter(Boolean)
+    .slice(0, 40);
+}
+
 function sanitizeRequestBody(value) {
   if (!value || typeof value !== "object") throw publicError("invalid_request", "Send a valid Coach request.", 400);
   const source = value.context;
@@ -93,6 +123,11 @@ function sanitizeRequestBody(value) {
       remainingSteps: cleanList(source.assignment.remainingSteps, 16, 800)
     };
   }
+  context.sources = cleanSources(
+    source.sources,
+    context.course.id,
+    context.assignment?.id
+  );
 
   const messages = (Array.isArray(value.messages) ? value.messages : [])
     .slice(-MAX_HISTORY_MESSAGES)
@@ -173,13 +208,17 @@ function mockCoachResponse(context) {
   const bilingual = language === "bilingual";
   if (!assignment) {
     const courseName = context.course.code || context.course.name || "this course";
+    const courseEvidence = context.sources
+      .filter((source) => source.id.startsWith(`course:${cleanId(context.course.id)}:`))
+      .slice(0, 3)
+      .map(sourceCitation);
     return {
       answer: isChinese
         ? `Mock 模式：${courseName} 的课程 Coach 已读取 syllabus 摘要。连接真实 AI 后，你可以继续追问政策、考试和学习计划。`
         : bilingual
           ? `Mock mode: ${courseName} syllabus context is ready. / 模拟模式：已读取这门课的 syllabus 摘要。`
           : `Mock mode: the syllabus context for ${courseName} is ready. Connect live AI for follow-up coaching.`,
-      evidence: context.course.syllabus.topics.slice(0, 3).map((text) => ({ label: "Course topic", text })),
+      evidence: courseEvidence,
       nextSteps: ["Choose an assignment for assignment-specific coaching."],
       missingInformation: context.course.syllabus.topics.length ? [] : ["Upload this course's syllabus."],
       usage: { inputTokens: 0, outputTokens: 0 },
@@ -188,13 +227,12 @@ function mockCoachResponse(context) {
   }
   const title = assignment.title || "Current assignment";
   const requirements = assignment.requirements;
-  const evidence = [
-    ...requirements.slice(0, 3).map((text) => ({ label: "Requirement", text })),
-    ...assignment.rubric.slice(0, Math.max(0, 3 - requirements.length)).map((item) => ({
-      label: item.weight ? `Rubric ${item.weight}` : "Rubric",
-      text: [item.label, item.description].filter(Boolean).join(": ")
-    }))
-  ];
+  const assignmentPrefix = `assignment:${cleanId(assignment.id)}:`;
+  const evidence = context.sources
+    .filter((source) => source.id.startsWith(assignmentPrefix))
+    .filter((source) => ["requirement", "rubric", "deadline"].includes(source.kind))
+    .slice(0, 3)
+    .map(sourceCitation);
   const nextSteps = (assignment.remainingSteps.length ? assignment.remainingSteps : assignment.steps).slice(0, 4);
   const answerEnglish = `Mock mode: ${title} is loaded with ${requirements.length} requirement${requirements.length === 1 ? "" : "s"}. Start by mapping each requirement to a concrete part of your submission.`;
   const answerChinese = `Mock 模式：已读取 ${title}，共识别到 ${requirements.length} 项要求。先把每项要求对应到作业中的一个具体部分。`;
@@ -205,6 +243,15 @@ function mockCoachResponse(context) {
     missingInformation: requirements.length ? [] : ["No assignment requirements were detected."],
     usage: { inputTokens: 0, outputTokens: 0 },
     mode: "mock"
+  };
+}
+
+function sourceCitation(source) {
+  return {
+    sourceId: source.id,
+    label: source.title,
+    excerpt: source.text,
+    location: source.location
   };
 }
 
@@ -221,8 +268,13 @@ function responseSchema() {
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["label", "text"],
-          properties: { label: { type: "string" }, text: { type: "string" } }
+          required: ["sourceId", "label", "excerpt", "location"],
+          properties: {
+            sourceId: { type: "string" },
+            label: { type: "string" },
+            excerpt: { type: "string" },
+            location: { type: "string" }
+          }
         }
       },
       nextSteps: { type: "array", maxItems: 8, items: { type: "string" } },
@@ -241,7 +293,7 @@ function extractOutputText(value) {
   return "";
 }
 
-function normalizeLiveResponse(value) {
+function normalizeLiveResponse(value, sources = []) {
   let parsed;
   try {
     parsed = JSON.parse(extractOutputText(value));
@@ -250,14 +302,36 @@ function normalizeLiveResponse(value) {
   }
   const answer = cleanText(parsed?.answer, 8000);
   if (!answer) throw publicError("invalid_upstream_response", "The AI Coach returned an invalid response.", 502);
+  const sourceMap = new Map(sources.map((source) => [source.id, source]));
+  const evidence = (Array.isArray(parsed.evidence) ? parsed.evidence : [])
+    .map((item) => {
+      const sourceId = cleanId(item?.sourceId);
+      const source = sourceMap.get(sourceId);
+      if (!source) return null;
+      const proposedExcerpt = cleanText(item?.excerpt || item?.text, 1000);
+      const trustedText = cleanText(source.text, 1000);
+      const excerptMatches = proposedExcerpt && (
+        trustedText.toLowerCase().includes(proposedExcerpt.toLowerCase()) ||
+        proposedExcerpt.toLowerCase().includes(trustedText.toLowerCase())
+      );
+      return {
+        sourceId,
+        label: cleanText(item?.label, 160) || cleanText(source.title, 160),
+        excerpt: excerptMatches ? proposedExcerpt : trustedText,
+        location: cleanText(item?.location, 240) || source.location
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+  const missingInformation = cleanList(parsed.missingInformation, 8, 600);
+  if (!evidence.length && sources.length && missingInformation.length < 8) {
+    missingInformation.push("No valid course-material citation was returned for this answer.");
+  }
   return {
     answer,
-    evidence: (Array.isArray(parsed.evidence) ? parsed.evidence : [])
-      .map((item) => ({ label: cleanText(item?.label, 160), text: cleanText(item?.text, 1000) }))
-      .filter((item) => item.label && item.text)
-      .slice(0, 8),
+    evidence,
     nextSteps: cleanList(parsed.nextSteps, 8, 600),
-    missingInformation: cleanList(parsed.missingInformation, 8, 600),
+    missingInformation,
     usage: {
       inputTokens: Math.max(0, Math.floor(Number(value.usage?.input_tokens) || 0)),
       outputTokens: Math.max(0, Math.floor(Number(value.usage?.output_tokens) || 0))
@@ -279,7 +353,10 @@ async function liveCoachResponse(payload, env, runtime) {
     "Explain requirements, ask useful questions, create plans, and check a student's work against the supplied requirements.",
     "Do not write an entire assessed submission for the student. Preserve student ownership and distinguish facts from inferences.",
     "Answer in the requested language. Keep the response specific, supportive, and concise.",
-    "Every evidence item must quote or closely preserve a supplied requirement, rubric item, deadline, policy, or course fact."
+    "Every factual claim about the course or assignment must cite one of the supplied sourceCatalog IDs.",
+    "Every evidence item must use an exact supplied sourceId and quote or closely preserve that source text.",
+    "If the sources do not answer the question, say so and put the unknown item in missingInformation.",
+    "Never present general advice as an instructor requirement."
   ].join("\n");
   const body = {
     model: cleanText(env.OPENAI_MODEL, 120) || "gpt-5-mini",
@@ -293,6 +370,7 @@ async function liveCoachResponse(payload, env, runtime) {
           language: payload.context.language,
           courseContext: payload.context.course,
           assignmentContext: payload.context.assignment,
+          sourceCatalog: payload.context.sources,
           conversation: payload.messages
         })
       }]
@@ -323,7 +401,7 @@ async function liveCoachResponse(payload, env, runtime) {
     });
     if (!response.ok) throw publicError("upstream_error", "The AI service is temporarily unavailable.", 502);
     const value = await response.json();
-    return normalizeLiveResponse(value);
+    return normalizeLiveResponse(value, payload.context.sources);
   } catch (error) {
     if (error?.publicCode) throw error;
     if (error?.name === "AbortError") throw publicError("upstream_timeout", "The AI Coach took too long to respond.", 504);
