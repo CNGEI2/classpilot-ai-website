@@ -364,10 +364,44 @@ test("Workers AI mode repairs a response that does not advance a completed step"
   assert.equal(response.status, 200);
   assert.equal(invocations.length, 2);
   assert.match(invocations[0].options.messages[1].content, /"turnIntent":"completed"/);
-  assert.match(invocations[1].options.messages.at(-1).content, /violated/i);
-  assert.match(invocations[1].options.messages.at(-1).content, /currentStep/i);
+  assert.match(invocations[1].options.messages[0].content, /violated/i);
+  assert.match(invocations[1].options.messages[0].content, /currentStep/i);
   assert.equal(value.phase, "outline");
   assert.equal(value.currentStep.id, "draft-premise");
+  assert.equal(value.checkpointQuestion, "What is your one-sentence premise?");
+});
+
+test("Workers AI mode promotes a structured model action when repair misplaces its step", async () => {
+  const { handleCoachRequest } = await workerModule();
+  let calls = 0;
+  const response = await handleCoachRequest(request(), {
+    ...baseEnv,
+    COACH_MODE: "workers_ai",
+    AI: {
+      async run() {
+        calls += 1;
+        return {
+          choices: [{ message: { content: JSON.stringify(coachResponse({
+            answer: "Write one sentence naming the character, decision, and ethical conflict.",
+            phase: "diagnose",
+            currentStep: null,
+            checkpointQuestion: "What is your one-sentence premise?"
+          })) } }]
+        };
+      }
+    }
+  });
+  const value = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(calls, 1);
+  assert.equal(value.phase, "understand");
+  assert.equal(value.answer, "Let's focus on one small step.");
+  assert.equal(
+    value.currentStep.instruction,
+    "Write one sentence naming the character, decision, and ethical conflict."
+  );
+  assert.equal(value.currentStep.estimatedMinutes, 10);
   assert.equal(value.checkpointQuestion, "What is your one-sentence premise?");
 });
 
