@@ -1314,8 +1314,8 @@ function renderCoach(course) {
     ? assignment.title || "Current assignment"
     : course.name || course.code || "Course guidance";
   const connectionLabel = coachMockMode
-    ? "Mock mode"
-    : coachEndpoint ? "Live AI connected" : "Live AI not connected";
+    ? "Practice mode"
+    : coachEndpoint ? "AI Coach online" : "AI Coach unavailable";
   const connectionClass = coachMockMode
     ? "is-mock"
     : coachEndpoint ? "is-live" : "is-offline";
@@ -1353,14 +1353,13 @@ function renderCoach(course) {
         coachQuickActionButton("check", "scan-search", "Check requirements") +
         coachQuickActionButton("plan", "calendar-clock", "Make a plan") +
       "</div>" +
-      '<div class="coach-transcript" aria-live="polite" aria-label="Coach conversation">' +
-        transcript +
+      '<div class="coach-transcript" data-coach-transcript aria-live="polite"' +
+        ' aria-label="Coach conversation">' +
+        transcript + (viewState.pending ? renderCoachTypingIndicator() : "") +
       "</div>" +
       (viewState.error
         ? '<p class="coach-request-status is-error" role="alert">' + escapeHtml(viewState.error) + "</p>"
-        : viewState.pending
-          ? '<p class="coach-request-status" role="status">Coach is reading this assignment...</p>'
-          : "") +
+        : "") +
       '<form class="coach-composer" data-coach-form>' +
         '<label class="coach-language">Language' +
           '<select data-coach-language name="coachLanguage" aria-label="Coach response language">' +
@@ -1370,7 +1369,7 @@ function renderCoach(course) {
           "</select></label>" +
         '<label class="coach-question"><span class="visually-hidden">Question for Coach</span>' +
           '<textarea name="coachQuestion" maxlength="4000" required' +
-            ' aria-label="Question for Coach" placeholder="Ask about ' +
+            ' aria-label="Question for Coach" placeholder="Message ClassPilot Coach about ' +
             escapeHtml(contextLabel) + '"></textarea></label>' +
         '<div class="coach-composer-actions">' +
           '<button type="submit" class="primary-action"' +
@@ -1444,9 +1443,28 @@ function renderCoachMessage(message, courseId = "", assignmentId = "") {
     ? '<span class="coach-message-mode">Mock</span>'
     : "";
   return '<article class="coach-message ' + (assistant ? "is-assistant" : "is-user") + '">' +
-    '<header><strong>' + (assistant ? "ClassPilot Coach" : "You") + "</strong>" + mode + "</header>" +
-    '<p class="coach-message-text">' + escapeHtml(message.text) + "</p>" +
-    evidence + nextSteps +
+    '<div class="coach-bubble">' +
+      '<header><span class="coach-avatar" aria-hidden="true">' +
+        (assistant ? "CP" : "YOU") + '</span><strong>' +
+        (assistant ? "ClassPilot Coach" : "You") + "</strong>" + mode + "</header>" +
+      '<p class="coach-message-text">' + escapeHtml(message.text) + "</p>" +
+      evidence + nextSteps +
+    "</div>" +
+  "</article>";
+}
+
+function renderCoachTypingIndicator() {
+  return '<article class="coach-message is-assistant is-typing">' +
+    '<div class="coach-bubble coach-typing-indicator" role="status"' +
+      ' aria-label="ClassPilot Coach is thinking">' +
+      '<header><span class="coach-avatar" aria-hidden="true">CP</span>' +
+        '<strong>ClassPilot Coach</strong></header>' +
+      '<span class="coach-typing-dots" aria-hidden="true">' +
+        '<span class="coach-typing-dot"></span>' +
+        '<span class="coach-typing-dot"></span>' +
+        '<span class="coach-typing-dot"></span>' +
+      "</span>" +
+    "</div>" +
   "</article>";
 }
 
@@ -1473,6 +1491,14 @@ function renderCoachIfActive(courseId, assignmentId) {
   }
   renderCoursesView();
   refreshIcons();
+  scrollActiveCoachTranscript();
+}
+
+function scrollActiveCoachTranscript() {
+  const transcript = elements.courseWorkspace?.querySelector?.("[data-coach-transcript]");
+  if (!transcript) return false;
+  transcript.scrollTop = transcript.scrollHeight;
+  return true;
 }
 
 function buildLocalMockCoachResponse(course, assignment, action, sourceCatalog = []) {

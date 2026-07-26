@@ -4431,6 +4431,13 @@ test("the Coach runtime loads before app.js and exposes the complete conversatio
   assert.match(appSource, /data-coach-source-id/);
   assert.match(appSource, /data-add-coach-task/);
   assert.match(appSource, /function addCoachStepAsTask/);
+  assert.match(appSource, /class="coach-bubble"/);
+  assert.match(appSource, /coach-typing-indicator/);
+  assert.match(appSource, /data-coach-transcript/);
+  assert.match(appSource, /function scrollActiveCoachTranscript/);
+  assert.match(css, /\.coach-message\.is-user\s*\{[^}]*justify-items:\s*end/s);
+  assert.match(css, /\.coach-message\.is-assistant\s*\{[^}]*justify-items:\s*start/s);
+  assert.match(css, /\.coach-typing-dot/);
   assert.match(appSource, /Selected course context is sent only when you ask/);
 });
 
@@ -4479,7 +4486,8 @@ test("opening Coach from an assignment preserves that exact assignment context",
   assert.match(markup, /2026-08-01 17:00/);
   assert.match(markup, /Ask about Final lab/);
   assert.match(markup, /Build the system/);
-  assert.match(markup, /Live AI not connected/);
+  assert.match(markup, /AI Coach unavailable/);
+  assert.match(markup, /data-coach-transcript/);
 });
 
 test("mock Coach conversations are clearly labeled and separated by assignment", async () => {

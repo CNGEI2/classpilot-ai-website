@@ -1313,13 +1313,18 @@ h3 {
 .coach-transcript {
   position: relative;
   display: grid;
-  gap: 0;
-  min-height: 240px;
-  max-height: 540px;
+  align-content: start;
+  gap: 4px;
+  min-height: 320px;
+  max-height: 560px;
+  padding: 14px 12px;
   overflow-y: auto;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.48);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.62)),
+    var(--panel);
+  scroll-behavior: smooth;
 }
 
 .coach-empty {
@@ -1348,46 +1353,63 @@ h3 {
 }
 
 .coach-message {
-  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
+  justify-items: start;
   min-width: 0;
-  padding: 18px 24px 20px 52px;
-  border-bottom: 1px solid var(--line);
+  padding: 7px 8px;
 }
 
-.coach-message:last-child {
-  border-bottom: 0;
-}
-
-.coach-message::before {
-  content: "";
-  position: absolute;
-  top: 22px;
-  left: 22px;
-  width: 10px;
-  height: 10px;
-  border: 2px solid var(--surface);
-  border-radius: 50%;
-  background: var(--teal);
-  box-shadow: 0 0 0 1px var(--teal);
+.coach-message.is-assistant {
+  justify-items: start;
 }
 
 .coach-message.is-user {
-  background: rgba(55, 111, 146, 0.06);
+  justify-items: end;
 }
 
-.coach-message.is-user::before {
-  background: var(--blue);
-  box-shadow: 0 0 0 1px var(--blue);
+.coach-bubble {
+  width: fit-content;
+  max-width: min(84%, 780px);
+  min-width: 0;
+  padding: 13px 15px 15px;
+  border: 1px solid var(--line);
+  border-radius: 8px 8px 8px 2px;
+  background: var(--surface);
+  box-shadow: 0 3px 10px rgba(20, 28, 34, 0.04);
 }
 
-.coach-message header {
+.coach-message.is-user .coach-bubble {
+  border-color: rgba(55, 111, 146, 0.24);
+  border-radius: 8px 8px 2px 8px;
+  background: #eef4f7;
+}
+
+.coach-bubble header {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-bottom: 8px;
   font-size: 0.75rem;
+}
+
+.coach-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border: 1px solid rgba(22, 118, 111, 0.34);
+  border-radius: 50%;
+  background: var(--teal);
+  color: white;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.58rem;
+  font-weight: 800;
+}
+
+.coach-message.is-user .coach-avatar {
+  border-color: rgba(55, 111, 146, 0.3);
+  background: var(--blue);
 }
 
 .coach-message-mode {
@@ -1398,20 +1420,54 @@ h3 {
 }
 
 .coach-message-text {
-  max-width: 760px;
   margin: 0;
   color: var(--ink-2);
+  line-height: 1.58;
   white-space: pre-wrap;
 }
 
 .coach-evidence,
 .coach-next-steps {
-  max-width: 780px;
+  max-width: 100%;
   margin-top: 6px;
   padding: 12px 14px;
   border-left: 3px solid var(--gold);
   background: rgba(199, 148, 25, 0.07);
   font-size: 0.8rem;
+}
+
+.coach-typing-indicator {
+  min-width: 168px;
+  padding-bottom: 13px;
+}
+
+.coach-typing-dots {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  height: 16px;
+  padding-left: 36px;
+}
+
+.coach-typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--teal);
+  animation: coach-thinking 1.2s ease-in-out infinite;
+}
+
+.coach-typing-dot:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.coach-typing-dot:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes coach-thinking {
+  0%, 60%, 100% { opacity: 0.32; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
 }
 
 .coach-next-steps {
@@ -1513,12 +1569,17 @@ h3 {
   grid-template-columns: 150px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: end;
-  margin-top: 14px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
 }
 
 .coach-composer textarea {
-  min-height: 76px;
+  min-height: 68px;
   max-height: 180px;
+  resize: vertical;
 }
 
 .coach-composer-actions {
