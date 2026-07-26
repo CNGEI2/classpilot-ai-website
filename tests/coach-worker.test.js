@@ -211,6 +211,39 @@ test("Workers AI mode reports a stable configuration error without its binding",
   });
 });
 
+test("Workers AI mode falls back to trusted assignment evidence when the model omits citations", async () => {
+  const { handleCoachRequest } = await workerModule();
+  const response = await handleCoachRequest(request(), {
+    ...baseEnv,
+    COACH_MODE: "workers_ai",
+    AI: {
+      async run(_model, options) {
+        assert.deepEqual(options.chat_template_kwargs, { thinking: false });
+        return {
+          choices: [{ message: { content: JSON.stringify({
+            answer: "Start by mapping the dilemma requirement to a scene.",
+            evidence: [],
+            nextSteps: ["Outline the dilemma scene"],
+            missingInformation: []
+          }) } }],
+          usage: { prompt_tokens: 90, completion_tokens: 30 }
+        };
+      }
+    }
+  });
+  const value = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(
+    value.evidence.map((item) => item.sourceId),
+    [
+      "assignment:future-care:requirement:1",
+      "assignment:future-care:requirement:2"
+    ]
+  );
+  assert.doesNotMatch(value.missingInformation.join(" "), /citation/i);
+});
+
 test("live mode sends a hardened structured request and normalizes usage", async () => {
   const { handleCoachRequest } = await workerModule();
   let upstream;

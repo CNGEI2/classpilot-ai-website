@@ -624,6 +624,12 @@ function normalizeLiveResponse(value, sources = []) {
     })
     .filter(Boolean)
     .slice(0, 8);
+  if (!evidence.length) {
+    evidence.push(...sources
+      .filter((source) => ["requirement", "rubric", "deadline"].includes(source.kind))
+      .slice(0, 2)
+      .map(sourceCitation));
+  }
   const missingInformation = cleanList(parsed.missingInformation, 8, 600);
   if (!evidence.length && sources.length && missingInformation.length < 8) {
     missingInformation.push("No valid course-material citation was returned for this answer.");
@@ -696,7 +702,8 @@ async function workersAiCoachResponse(payload, env) {
         messages,
         response_format: { type: "json_object" },
         max_completion_tokens: 1400,
-        temperature: 0.2
+        temperature: 0.2,
+        chat_template_kwargs: { thinking: false }
       }),
       timeoutPromise
     ]);
