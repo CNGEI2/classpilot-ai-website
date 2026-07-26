@@ -235,6 +235,8 @@ test("Workers AI mode sends a bounded multi-turn chat and normalizes its respons
   assert.match(invocation.options.messages[0].content, /wait for the student/i);
   assert.match(invocation.options.messages[0].content, /stuck/i);
   assert.match(invocation.options.messages[0].content, /complete assessed submission/i);
+  assert.match(invocation.options.messages[0].content, /questions only in checkpointQuestion/i);
+  assert.match(invocation.options.messages[0].content, /turnIntent/i);
   assert.match(invocation.options.messages[0].content, /untrusted reference data/i);
   assert.doesNotMatch(JSON.stringify(invocation.options), /Private other course|secretInternalNote/);
 });
@@ -292,13 +294,15 @@ test("Workers AI mode falls back to trusted assignment evidence when the model o
   assert.doesNotMatch(value.missingInformation.join(" "), /citation/i);
 });
 
-test("Workers AI mode safely accepts a plain conversational answer when JSON formatting drifts", async () => {
+test("Workers AI mode retries once and rejects repeated plain-text contract drift", async () => {
   const { handleCoachRequest } = await workerModule();
+  let calls = 0;
   const response = await handleCoachRequest(request(), {
     ...baseEnv,
     COACH_MODE: "workers_ai",
     AI: {
       async run() {
+        calls += 1;
         return {
           choices: [{ message: { content: "Start with the ethical dilemma, then connect it to a possible solution." } }],
           usage: { prompt_tokens: 70, completion_tokens: 22 }
@@ -308,13 +312,84 @@ test("Workers AI mode safely accepts a plain conversational answer when JSON for
   });
   const value = await response.json();
 
+  assert.equal(response.status, 502);
+  assert.deepEqual(value, {
+    code: "invalid_upstream_response",
+    message: "The AI Coach returned an invalid response."
+  });
+  assert.equal(calls, 2);
+});
+
+test("Workers AI mode repairs a response that does not advance a completed step", async () => {
+  const { handleCoachRequest } = await workerModule();
+  const invocations = [];
+  const body = validBody({
+    messages: [{ role: "user", text: "I completed that step. What should I do next?" }]
+  });
+  const response = await handleCoachRequest(request(body), {
+    ...baseEnv,
+    COACH_MODE: "workers_ai",
+    AI: {
+      async run(model, options) {
+        invocations.push({ model, options });
+        if (invocations.length === 1) {
+          return {
+            choices: [{ message: { content: JSON.stringify(coachResponse({
+              answer: "Great. What would you like to do next?",
+              phase: "diagnose",
+              currentStep: null,
+              checkpointQuestion: "What would you like to do next?"
+            })) } }]
+          };
+        }
+        return {
+          choices: [{ message: { content: JSON.stringify(coachResponse({
+            answer: "You are ready to turn one requirement into a scene premise.",
+            phase: "outline",
+            currentStep: {
+              id: "draft-premise",
+              title: "Draft one scene premise",
+              instruction: "Write one sentence naming the character, decision, and ethical conflict.",
+              doneWhen: "Your sentence includes all three elements.",
+              estimatedMinutes: 10
+            },
+            checkpointQuestion: "What is your one-sentence premise?"
+          })) } }]
+        };
+      }
+    }
+  });
+  const value = await response.json();
+
   assert.equal(response.status, 200);
-  assert.equal(value.mode, "live");
-  assert.match(value.answer, /ethical dilemma/i);
-  assert.equal(value.evidence[0].sourceId, "assignment:future-care:requirement:1");
-  assert.equal(value.phase, "diagnose");
-  assert.equal(value.currentStep, null);
-  assert.equal(value.waitingForStudent, true);
+  assert.equal(invocations.length, 2);
+  assert.match(invocations[0].options.messages[1].content, /"turnIntent":"completed"/);
+  assert.match(invocations[1].options.messages.at(-1).content, /violated/i);
+  assert.match(invocations[1].options.messages.at(-1).content, /currentStep/i);
+  assert.equal(value.phase, "outline");
+  assert.equal(value.currentStep.id, "draft-premise");
+  assert.equal(value.checkpointQuestion, "What is your one-sentence premise?");
+});
+
+test("Workers AI mode reads Cloudflare response payloads", async () => {
+  const { handleCoachRequest } = await workerModule();
+  const response = await handleCoachRequest(request(), {
+    ...baseEnv,
+    COACH_MODE: "workers_ai",
+    AI: {
+      async run() {
+        return {
+          response: JSON.stringify(coachResponse({
+            answer: "Start with one sentence that names the ethical conflict."
+          }))
+        };
+      }
+    }
+  });
+  const value = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(value.currentStep.id, "identify-requirement");
 });
 
 test("Workers AI mode keeps exactly one sanitized current step", async () => {
@@ -417,6 +492,7 @@ test("live mode sends a hardened structured request and normalizes usage", async
   assert.equal(sent.store, false);
   assert.equal(sent.model, "gpt-5-mini");
   assert.equal(sent.reasoning.effort, "low");
+  assert.match(sent.input[0].content[0].text, /"turnIntent":"next"/);
   assert.equal(sent.text.format.type, "json_schema");
   assert.equal(sent.text.format.schema.properties.currentStep.type[0], "object");
   assert.equal(sent.text.format.schema.properties.currentStep.type[1], "null");
