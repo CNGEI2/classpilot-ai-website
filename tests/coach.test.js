@@ -166,13 +166,38 @@ test("validateCoachResponse accepts the public contract and strips extra data", 
 
   assert.deepEqual(value, {
     answer: "Start by mapping each requirement to one scene.",
-    evidence: [{ label: "Requirement", text: "Include one ethical dilemma" }],
+    evidence: [{
+      sourceId: "",
+      label: "Requirement",
+      excerpt: "Include one ethical dilemma",
+      location: ""
+    }],
     nextSteps: ["Draft the conflict"],
     missingInformation: [],
     usage: { inputTokens: 120, outputTokens: 40 },
     mode: "live"
   });
   assert.throws(() => validateCoachResponse({ answer: "" }), /answer/i);
+});
+
+test("validateCoachResponse keeps rich citations and strips extra fields", () => {
+  const value = validateCoachResponse({
+    answer: "Use the interview evidence.",
+    evidence: [{
+      sourceId: "assignment:assignment-a:requirement:1",
+      label: "Requirement",
+      excerpt: "Interview one professional",
+      location: "Requirement 1",
+      secret: "remove"
+    }]
+  });
+
+  assert.deepEqual(value.evidence[0], {
+    sourceId: "assignment:assignment-a:requirement:1",
+    label: "Requirement",
+    excerpt: "Interview one professional",
+    location: "Requirement 1"
+  });
 });
 
 test("coach client refuses to fake a request when no endpoint is configured", async () => {

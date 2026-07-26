@@ -241,8 +241,14 @@
       .map((item) => {
         if (!item || typeof item !== "object") return null;
         const label = cleanText(item.label, 160);
-        const text = cleanText(item.text, 1000);
-        return label && text ? { label, text } : null;
+        const excerpt = cleanText(item.excerpt || item.text, 1000);
+        if (!label || !excerpt) return null;
+        return {
+          sourceId: cleanText(item.sourceId, 180).replace(/[^a-zA-Z0-9._:-]/g, "-"),
+          label,
+          excerpt,
+          location: cleanText(item.location, 240)
+        };
       })
       .filter(Boolean)
       .slice(0, 8);
