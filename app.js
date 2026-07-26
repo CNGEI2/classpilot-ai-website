@@ -18,6 +18,7 @@ const {
   updateCourse,
   updateAssignment
 } = window.ClassPilotPlanner;
+const { buildStudySchedule } = window.ClassPilotStudyScheduler;
 const {
   bindDraftToCourse,
   buildAssignmentCoach,
@@ -597,7 +598,38 @@ function renderRecentlyCompleted(items) {
   );
 }
 
-function renderFocusRail(queue) {
+function renderStudySchedule(plan) {
+  const sessions = Array.isArray(plan?.sessions) ? plan.sessions.slice(0, 6) : [];
+  const content = sessions.length
+    ? '<ul class="study-session-list">' + sessions.map((session) => {
+        const starts = new Date(session.startAt);
+        const time = Number.isFinite(starts.getTime())
+          ? starts.toLocaleDateString(undefined, {
+              weekday: "short",
+              hour: "numeric",
+              minute: "2-digit"
+            })
+          : "Time unavailable";
+        return (
+          '<li><button type="button" class="study-session-item" data-course-id="' +
+            escapeHtml(session.courseId) + '" data-assignment-id="' +
+            escapeHtml(session.assignmentId) + '">' +
+            '<span><strong>' + escapeHtml(session.title) + "</strong><small>" +
+              escapeHtml(session.nextAction || "Continue assignment") + "</small></span>" +
+            '<span><strong>' + escapeHtml(time) + "</strong><small>" +
+              escapeHtml(session.minutes) + " min</small></span>" +
+          "</button></li>"
+        );
+      }).join("") + "</ul>"
+    : '<p class="empty-state light">No study sessions are needed.</p>';
+  return (
+    '<section class="focus-group study-plan" aria-labelledby="studyPlanHeading">' +
+      '<h2 id="studyPlanHeading">Study plan</h2>' + content +
+    "</section>"
+  );
+}
+
+function renderFocusRail(queue, studyPlan) {
   return (
     '<div class="focus-rail">' +
       '<section class="focus-group focus-now" aria-labelledby="nowHeading">' +
@@ -621,6 +653,7 @@ function renderFocusRail(queue) {
           ""
         ) +
       "</section>" +
+      renderStudySchedule(studyPlan) +
       renderRecentlyCompleted(queue.recentlyCompleted) +
     "</div>"
   );
@@ -702,9 +735,10 @@ function renderToday() {
   }
   const now = new Date();
   const queue = buildTodayQueue(workspace, now);
+  const studyPlan = buildStudySchedule(workspace, now);
   queue.thisWeek = upcomingThisWeek(queue.thisWeek, now);
   elements.todayView.innerHTML = queue.now
-    ? renderFocusRail(queue)
+    ? renderFocusRail(queue, studyPlan)
     : renderEmptyToday() + renderRecentlyCompleted(queue.recentlyCompleted);
   refreshIcons();
 }
@@ -1811,6 +1845,27 @@ function currentCalendarFilter() {
   };
 }
 
+function calendarItemsWithStudy(filter = currentCalendarFilter()) {
+  const includeStudy = !filter.type || filter.type === "all" || filter.type === "study";
+  const base = buildCalendarItems(workspace, filter);
+  if (!includeStudy) return base;
+  const study = buildStudySchedule(workspace, new Date()).sessions
+    .filter((session) => !filter.courseId || filter.courseId === "all" ||
+      session.courseId === filter.courseId)
+    .map((session) => ({
+      id: session.id,
+      courseId: session.courseId,
+      courseCode: session.courseCode,
+      title: "Study: " + session.title,
+      dueAt: session.startAt,
+      displayDate: session.startAt,
+      type: "study"
+    }));
+  return [...base, ...study].sort((left, right) =>
+    new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime()
+  );
+}
+
 function renderAgendaItems(items, emptyMessage) {
   if (items.length === 0) {
     return '<p class="empty-state light">' + escapeHtml(emptyMessage) + "</p>";
@@ -1838,7 +1893,7 @@ function renderCalendarCourseOptions() {
 
 function renderCalendar() {
   renderCalendarCourseOptions();
-  const items = buildCalendarItems(workspace, currentCalendarFilter());
+  const items = calendarItemsWithStudy();
   const byDate = new Map();
   const undated = [];
   items.forEach((item) => {
@@ -1919,7 +1974,7 @@ function downloadCalendar() {
   downloadTextFile(
     "classpilot-calendar.ics",
     "text/calendar;charset=utf-8",
-    createIcsCalendar(buildCalendarItems(workspace, currentCalendarFilter()))
+    createIcsCalendar(calendarItemsWithStudy())
   );
   showStatus("Calendar download started.", "success");
   return true;

@@ -10,6 +10,7 @@
     <script src="vendor/tesseract/tesseract.min.js?v=16" defer data-ocr-script></script>
     <script src="logic.js?v=16" defer></script>
     <script src="planner.js?v=16" defer></script>
+    <script src="study-scheduler.js?v=17" defer></script>
     <script src="vendor/jszip/jszip.min.js?v=17" defer></script>
     <script src="file-readers.js?v=16" defer></script>
     <script src="source-evidence.js?v=17" defer></script>
@@ -66,6 +67,7 @@
                 <option value="all">All items</option>
                 <option value="assignment">Assignments</option>
                 <option value="exam">Exams</option>
+                <option value="study">Study sessions</option>
               </select>
             </label>
             <div role="group" aria-label="Calendar month">
@@ -107,9 +109,9 @@
       <form id="importForm">
         <input id="courseId" type="hidden" name="courseId">
         <div id="importDropZone" class="import-source">
-          <label>Choose PDF, image, or text file
+          <label>Choose PDF, Office, image, or text file
             <input id="importFile" name="importFile" type="file"
-              accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.md,.csv,application/pdf,image/png,image/jpeg,image/webp,text/plain,text/markdown,text/csv">
+              accept=".pdf,.docx,.pptx,.png,.jpg,.jpeg,.webp,.txt,.md,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,text/plain,text/markdown,text/csv">
           </label>
           <label>Or paste course material
             <textarea id="importText" name="importText"></textarea>

@@ -8,6 +8,7 @@ const sourceEvidence = require("../source-evidence.js");
 const submissionChecker = require("../submission-checker.js");
 const logic = require("../logic.js");
 const planner = require("../planner.js");
+const studyScheduler = require("../study-scheduler.js");
 
 const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const appSource = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
@@ -658,6 +659,7 @@ function runApp({
     ClassPilotSubmissionChecker: submissionChecker,
     ClassPilotLogic: logicApi,
     ClassPilotPlanner: planner,
+    ClassPilotStudyScheduler: studyScheduler,
     console: {
       error: (...args) => errors.push(args),
       log: () => {},
@@ -2905,6 +2907,7 @@ test("loads local runtime dependencies before app.js", () => {
     "vendor/tesseract/tesseract.min.js",
     "logic.js",
     "planner.js",
+    "study-scheduler.js",
     "vendor/jszip/jszip.min.js",
     "file-readers.js",
     "submission-checker.js",
@@ -3343,6 +3346,9 @@ test("Today starts a focused next-action session and completes its checklist tas
   const today = app.document.elements.get("todayView");
   const start = today.children.find((control) => control.dataset.startFocus !== undefined);
 
+  assert.match(today.innerHTML, /Study plan/);
+  assert.match(today.innerHTML, /Draft the report outline/);
+
   app.document.dispatchClick(start);
 
   assert.match(today.innerHTML, /class="focus-session"/);
@@ -3353,6 +3359,32 @@ test("Today starts a focused next-action session and completes its checklist tas
 
   assert.equal(persistedWorkspace(app).courses[0].assignments[0].tasks[0].done, true);
   assert.doesNotMatch(today.innerHTML, /class="focus-session"/);
+});
+
+test("Calendar exposes automatically replanned study sessions", async () => {
+  const app = runApp({
+    now: "2026-07-25T08:00:00-07:00",
+    workspaceRaw: JSON.stringify(createWorkspace([{
+      id: "course-1",
+      code: "AI450",
+      name: "AI in Society",
+      assignments: [{
+        id: "paper",
+        title: "Satoshi Paper",
+        dueAt: "2026-07-28T23:00:00-07:00",
+        estimateMinutes: 50,
+        tasks: [{ id: "outline", title: "Draft outline", done: false }]
+      }]
+    }], { activeView: "calendar" }))
+  });
+  const type = app.document.elements.get("calendarTypeFilter");
+  type.value = "study";
+
+  await type.dispatch("change");
+
+  assert.match(app.document.elements.get("calendarGrid").innerHTML, /Study: Satoshi Paper/);
+  assert.match(app.document.elements.get("calendarAgenda").innerHTML, /Study: Satoshi Paper/);
+  assert.doesNotMatch(app.document.elements.get("calendarAgenda").innerHTML, /assignment<\/span>/);
 });
 
 test("This week excludes overdue work while Today still shows it in Now", () => {
@@ -3376,7 +3408,10 @@ test("This week excludes overdue work while Today still shows it in Now", () => 
     }]))
   });
   const markup = app.document.elements.get("todayView").innerHTML;
-  const thisWeekMarkup = markup.slice(markup.indexOf('id="thisWeekHeading"'));
+  const thisWeekMarkup = markup.slice(
+    markup.indexOf('id="thisWeekHeading"'),
+    markup.indexOf('id="studyPlanHeading"')
+  );
 
   assert.match(markup, /Months old overdue/);
   assert.doesNotMatch(thisWeekMarkup, /Months old overdue/);

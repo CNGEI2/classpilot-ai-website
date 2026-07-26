@@ -518,7 +518,7 @@ h3 {
 }
 
 .focus-now {
-  grid-row: 1 / span 3;
+  grid-row: 1 / span 4;
   padding-right: 24px;
   border-right: 1px solid var(--line);
 }
@@ -748,6 +748,47 @@ h3 {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.study-session-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.study-session-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 4px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.study-session-item:hover {
+  background: var(--surface);
+}
+
+.study-session-item > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.study-session-item > span:last-child {
+  text-align: right;
+}
+
+.study-session-item small {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.72rem;
 }
 
 .recent-completed-item {

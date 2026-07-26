@@ -14,6 +14,7 @@ const frontendRuntime = [
   "app.js",
   "logic.js",
   "planner.js",
+  "study-scheduler.js",
   "file-readers.js",
   "source-evidence.js",
   "submission-checker.js",
@@ -50,7 +51,7 @@ test("Pages workflow uses least privilege and packages the verified runtime", ()
   assert.match(deployJob, /rm -rf site-dist/);
   assert.match(
     deployJob,
-    /cp index\.html app\.js logic\.js planner\.js file-readers\.js source-evidence\.js submission-checker\.js coach\.js styles\.css \.nojekyll site-dist\//
+    /cp index\.html app\.js logic\.js planner\.js study-scheduler\.js file-readers\.js source-evidence\.js submission-checker\.js coach\.js styles\.css \.nojekyll site-dist\//
   );
   assert.match(deployJob, /cp -R vendor site-dist\/vendor/);
 });
