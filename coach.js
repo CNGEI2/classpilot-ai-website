@@ -67,7 +67,41 @@
       .slice(0, 12);
   }
 
-  function buildCoachContext(course = {}, assignment = null, language = "en", action = "chat") {
+  function cleanSources(values, courseId, assignmentId) {
+    const coursePrefix = `course:${cleanId(courseId)}:`;
+    const assignmentPrefix = assignmentId
+      ? `assignment:${cleanId(assignmentId)}:`
+      : "";
+    const seen = new Set();
+    return (Array.isArray(values) ? values : [])
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const id = cleanId(item.id);
+        const belongsToContext = id.startsWith(coursePrefix) ||
+          (assignmentPrefix && id.startsWith(assignmentPrefix));
+        if (!belongsToContext || seen.has(id)) return null;
+        const source = {
+          id,
+          kind: cleanText(item.kind, 80),
+          title: cleanText(item.title, 240),
+          location: cleanText(item.location, 240),
+          text: cleanText(item.text, 1600)
+        };
+        if (!source.kind || !source.title || !source.text) return null;
+        seen.add(id);
+        return source;
+      })
+      .filter(Boolean)
+      .slice(0, 40);
+  }
+
+  function buildCoachContext(
+    course = {},
+    assignment = null,
+    language = "en",
+    action = "chat",
+    sourceCatalog = []
+  ) {
     const plan = course && typeof course.coursePlan === "object" ? course.coursePlan : {};
     const context = {
       course: {
@@ -84,6 +118,7 @@
         }
       },
       assignment: null,
+      sources: cleanSources(sourceCatalog, course.id, assignment?.id),
       language: ALLOWED_LANGUAGES.has(language) ? language : "en",
       action: ALLOWED_ACTIONS.has(action) ? action : "chat"
     };

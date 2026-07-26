@@ -96,6 +96,35 @@ test("buildCoachContext bounds every collection and text field", () => {
   assert.ok(context.assignment.requirements.every((item) => item.length <= 1200));
 });
 
+test("buildCoachContext includes only bounded sources for the selected assignment", () => {
+  const sources = Array.from({ length: 42 }, (_, index) => ({
+    id: `assignment:assignment-a:requirement:${index + 1}`,
+    kind: "requirement",
+    title: `Requirement ${index + 1}`,
+    location: `Requirement ${index + 1}`,
+    text: index === 0 ? "Include one ethical dilemma" : "x".repeat(2000)
+  }));
+
+  const context = buildCoachContext(
+    selectedCourse,
+    selectedCourse.assignments[0],
+    "en",
+    "check",
+    sources
+  );
+
+  assert.equal(context.sources.length, 40);
+  assert.deepEqual(context.sources[0], {
+    id: "assignment:assignment-a:requirement:1",
+    kind: "requirement",
+    title: "Requirement 1",
+    location: "Requirement 1",
+    text: "Include one ethical dilemma"
+  });
+  assert.ok(context.sources.every((item) => item.text.length <= 1600));
+  assert.doesNotMatch(JSON.stringify(context.sources), /Private other course|secretInternalNote/);
+});
+
 test("coachThreadKey separates course-level and assignment conversations", () => {
   assert.equal(coachThreadKey("course-a", "assignment-a"), "classpilot.coach.v1:course-a:assignment-a");
   assert.equal(coachThreadKey("course-a", ""), "classpilot.coach.v1:course-a:course");
