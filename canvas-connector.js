@@ -99,10 +99,25 @@
   }
 
   function canvasStatus(remote = {}) {
+    if (remote.status && typeof remote.status === "object") {
+      const state = cleanText(remote.status.state, 120) || "In progress";
+      return {
+        value: state,
+        grading: /^graded$/i.test(state) ? "Graded" : "",
+        score: cleanText(remote.status.score, 120),
+        submittedAt: cleanText(remote.status.submittedAt, 160),
+        submission: /submitted|graded/i.test(state) ? "Submitted" : "Not submitted",
+        nextUp: cleanText(remote.status.nextUp, 240),
+        late: /^late$/i.test(state)
+      };
+    }
     const submission = remote.submission && typeof remote.submission === "object"
       ? remote.submission
       : {};
-    const points = Number(remote.points_possible);
+    const points = remote.points_possible === null || remote.points_possible === undefined ||
+      remote.points_possible === ""
+      ? Number.NaN
+      : Number(remote.points_possible);
     const score = Number(submission.score);
     return {
       value: submission.workflow_state === "graded" ? "Graded" :
@@ -122,7 +137,14 @@
     const description = htmlToText(remote.description);
     const listItems = htmlListItems(remote.description);
     const due = cleanText(remote.due_at, 120);
-    const points = Number(remote.points_possible);
+    const points = remote.points_possible === null || remote.points_possible === undefined ||
+      remote.points_possible === ""
+      ? Number.NaN
+      : Number(remote.points_possible);
+    const sourceType = cleanText(remote.source_type || course.source_type, 120) || "Canvas API";
+    const remoteLinks = (Array.isArray(remote.links) ? remote.links : [])
+      .map((item) => cleanText(item?.href || item, 2000))
+      .filter(Boolean);
     const material = [
       `${course.course_code || course.name} > Assignments > ${remote.name}`,
       due ? `Due: ${due}` : "",
@@ -135,8 +157,9 @@
     draft.assignment = cleanText(remote.name, 500) || "Untitled assignment";
     draft.dueDate = due || "No date";
     draft.points = Number.isFinite(points) ? `${points} Points Possible` : "";
-    draft.linksText = cleanText(remote.html_url, 2000);
-    draft.sourceType = "Canvas API";
+    draft.linksText = [cleanText(remote.html_url, 2000), ...remoteLinks]
+      .filter(Boolean).join("\n");
+    draft.sourceType = sourceType;
     draft.confidence = 100;
     draft.confidenceLabel = "Verified from Canvas";
     draft.status = canvasStatus(remote);
@@ -153,12 +176,22 @@
         : []).map((item) => cleanText(item, 20).toLowerCase()).filter(Boolean),
       submissionTypes: (Array.isArray(remote.submission_types)
         ? remote.submission_types
-        : []).map((item) => cleanText(item, 80)).filter(Boolean)
+        : []).map((item) => cleanText(item, 80)).filter(Boolean),
+      rubric: (Array.isArray(remote.rubric) ? remote.rubric : [])
+        .map((item) => ({
+          label: cleanText(item?.label, 300),
+          weight: cleanText(item?.points || item?.weight, 120),
+          description: cleanText(item?.description, 1200)
+        }))
+        .filter((item) => item.label)
+        .slice(0, 30)
     };
     const created = logic.createAssignmentFromDraft(draft, localCourseId);
-    const dueAt = due && Number.isFinite(new Date(due).getTime())
-      ? new Date(due).toISOString()
-      : "";
+    const dueAt = typeof planner.parseDueAt === "function"
+      ? planner.parseDueAt(due)
+      : due && Number.isFinite(new Date(due).getTime())
+        ? new Date(due).toISOString()
+        : "";
     const next = {
       ...created,
       id: existing?.id || stableId("canvas-assignment", course.id, remote.id),
@@ -171,7 +204,7 @@
       tasks: preserveTaskState(existing, created),
       source: {
         ...(created.source || {}),
-        type: "Canvas API",
+        type: sourceType,
         canvasDomain: course.canvasDomain,
         canvasCourseId: String(course.id),
         canvasAssignmentId: String(remote.id),
@@ -242,11 +275,11 @@
           term: cleanText(remote.term?.name, 240) ||
             syllabusDraft.coursePlan?.term || base.coursePlan?.term || "",
           syllabusUploaded: Boolean(syllabusText) || Boolean(base.coursePlan?.syllabusUploaded),
-          sourceType: "Canvas API"
+          sourceType: cleanText(remote.source_type, 120) || "Canvas API"
         },
         source: {
           ...(base.source || {}),
-          type: "Canvas API",
+          type: cleanText(remote.source_type, 120) || "Canvas API",
           canvasDomain: domain,
           canvasCourseId: String(remote.id)
         }
@@ -259,5 +292,93 @@
     return next;
   }
 
-  return { htmlToText, mergeCanvasSnapshot, normalizeCanvasDomain };
+  function numericPoints(value) {
+    const match = cleanText(value, 160).match(/\d+(?:\.\d+)?/);
+    return match ? Number(match[0]) : null;
+  }
+
+  function captureFallbackId(prefix, ...parts) {
+    return stableId(prefix, ...parts) || `${prefix}-unknown`;
+  }
+
+  function captureToCanvasSnapshot(capture = {}) {
+    const domain = normalizeCanvasDomain(capture.canvasHost);
+    const courseSource = capture.course && typeof capture.course === "object"
+      ? capture.course
+      : {};
+    const courseCode = cleanText(courseSource.code, 160);
+    const courseName = cleanText(courseSource.name, 500) || courseCode;
+    if (!domain || (!courseSource.canvasId && !courseCode && !courseName)) {
+      throw new Error("The Canvas course identity could not be read.");
+    }
+    const courseId = cleanText(courseSource.canvasId, 160) ||
+      captureFallbackId("captured-course", domain, courseCode || courseName);
+    const remoteCourse = {
+      id: courseId,
+      course_code: courseCode || courseName,
+      name: courseName || courseCode,
+      source_type: "Canvas page capture",
+      syllabus_body: cleanMultiline(capture.syllabus?.text, 100000),
+      assignments: []
+    };
+    const term = courseName.match(/\b(Spring|Summer|Fall|Winter)\s+\d{4}\b/i)?.[0];
+    if (term) remoteCourse.term = { name: term };
+    if (capture.assignment && typeof capture.assignment === "object") {
+      const source = capture.assignment;
+      const title = cleanText(source.title, 500);
+      if (!title) throw new Error("The Canvas assignment title could not be read.");
+      const assignmentId = cleanText(source.canvasId, 160) ||
+        captureFallbackId("captured-assignment", courseId, title, source.dueDate);
+      remoteCourse.assignments.push({
+        id: assignmentId,
+        name: title,
+        due_at: cleanText(source.dueDate, 240),
+        points_possible: numericPoints(source.points),
+        html_url: cleanText(capture.sourceUrl, 2000),
+        description: cleanMultiline(source.instructionsText || capture.rawText, 80000),
+        allowed_extensions: (Array.isArray(source.allowedExtensions)
+          ? source.allowedExtensions
+          : []).map((item) => cleanText(item, 20)).filter(Boolean),
+        submission_types: (Array.isArray(source.submissionTypes)
+          ? source.submissionTypes
+          : []).map((item) => cleanText(item, 80)).filter(Boolean),
+        status: source.status && typeof source.status === "object" ? {
+          state: cleanText(source.status.state, 120),
+          nextUp: cleanText(source.status.nextUp, 240),
+          submittedAt: cleanText(source.status.submittedAt, 160),
+          score: cleanText(source.status.score, 120)
+        } : {},
+        links: (Array.isArray(source.links) ? source.links : [])
+          .map((item) => ({
+            text: cleanText(item?.text, 300),
+            href: cleanText(item?.href, 2000)
+          }))
+          .filter((item) => item.href),
+        rubric: (Array.isArray(source.rubric) ? source.rubric : [])
+          .map((item) => ({
+            label: cleanText(item?.label, 300),
+            description: cleanText(item?.description, 1200),
+            points: cleanText(item?.points, 120)
+          }))
+          .filter((item) => item.label),
+        source_type: "Canvas page capture"
+      });
+    }
+    if (!remoteCourse.assignments.length && !remoteCourse.syllabus_body) {
+      throw new Error("Open a Canvas assignment, rubric, or syllabus page and try again.");
+    }
+    return { domain, courses: [remoteCourse] };
+  }
+
+  function mergeCanvasCapture(workspace, capture = {}, now = new Date()) {
+    return mergeCanvasSnapshot(workspace, captureToCanvasSnapshot(capture), now);
+  }
+
+  return {
+    captureToCanvasSnapshot,
+    htmlToText,
+    mergeCanvasCapture,
+    mergeCanvasSnapshot,
+    normalizeCanvasDomain
+  };
 });

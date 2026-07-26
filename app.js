@@ -35,6 +35,7 @@ const {
 } = window.ClassPilotSourceEvidence;
 const { analyzeSubmission } = window.ClassPilotSubmissionChecker;
 const {
+  mergeCanvasCapture,
   mergeCanvasSnapshot,
   normalizeCanvasDomain
 } = window.ClassPilotCanvasConnector;
@@ -70,6 +71,11 @@ const coachMockMode = /(?:^|[?&])coach=mock(?:&|$)/i.test(
 );
 const canvasEndpoint = document
   .querySelector('meta[name="classpilot-canvas-endpoint"]')
+  ?.getAttribute("content")
+  ?.trim()
+  ?.replace(/\/$/, "") || "";
+const importHandoffEndpoint = document
+  .querySelector('meta[name="classpilot-import-endpoint"]')
   ?.getAttribute("content")
   ?.trim()
   ?.replace(/\/$/, "") || "";
@@ -2150,6 +2156,106 @@ async function handleCanvasMessage(event) {
   return syncCanvas();
 }
 
+function pendingCanvasImportCode() {
+  try {
+    const match = String(window.location.search || "")
+      .match(/(?:^\?|&)import=([^&]*)/);
+    const code = match ? decodeURIComponent(match[1].replace(/\+/g, " ")) : "";
+    return /^[a-zA-Z0-9._:-]{8,180}$/.test(code) ? code : "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function clearCanvasImportCode() {
+  try {
+    const parts = String(window.location.search || "")
+      .replace(/^\?/, "")
+      .split("&")
+      .filter(Boolean);
+    if (!parts.some((part) => /^import=/i.test(part))) return;
+    const query = parts.filter((part) => !/^import=/i.test(part)).join("&");
+    window.history.replaceState(
+      null,
+      "",
+      String(window.location.pathname || "/") + (query ? `?${query}` : "") +
+        String(window.location.hash || "")
+    );
+  } catch (_error) {
+    // Import redemption still continues when browser history is restricted.
+  }
+}
+
+function capturedCourse(workspaceValue, capture) {
+  const domain = normalizeCanvasDomain(capture?.canvasHost);
+  const remoteId = String(capture?.course?.canvasId || "");
+  const code = String(capture?.course?.code || "").trim().toLowerCase();
+  return workspaceValue.courses.find((course) =>
+    domain && remoteId && course.source?.canvasDomain === domain &&
+      String(course.source?.canvasCourseId || "") === remoteId
+  ) || workspaceValue.courses.find((course) =>
+    code && String(course.code || "").trim().toLowerCase() === code
+  ) || null;
+}
+
+async function redeemPendingCanvasImport() {
+  const code = /(?:^\?|&)import=/.test(String(window.location.search || ""));
+  const validCode = pendingCanvasImportCode();
+  if (!code) return false;
+  clearCanvasImportCode();
+  if (!validCode) {
+    showStatus("This ClassPilot import link is invalid. Capture the Canvas page again.", "warn");
+    return false;
+  }
+  if (!importHandoffEndpoint) {
+    showStatus("Canvas Companion imports are not configured yet.", "warn");
+    return false;
+  }
+  showStatus("Importing the Canvas page...");
+  try {
+    const response = await fetch(importHandoffEndpoint + "/redeem", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: validCode })
+    });
+    const value = await response.json().catch(() => ({}));
+    if (!response.ok || !value.capture) {
+      throw new Error(value.message || "The Canvas page import could not be redeemed.");
+    }
+    const nextWorkspace = mergeCanvasCapture(workspace, value.capture);
+    const course = capturedCourse(nextWorkspace, value.capture);
+    if (!course) throw new Error("The imported Canvas course could not be opened.");
+    nextWorkspace.preferences.activeCourseId = course.id;
+    nextWorkspace.preferences.activeView = "courses";
+    if (!commitWorkspace(nextWorkspace, { render: false })) return false;
+    state.activeView = "courses";
+    state.activeCourseTab = value.capture.assignment ? "assignments" : "syllabus";
+    state.selectedAssignmentId = value.capture.assignment
+      ? course.assignments.find((assignment) =>
+          String(assignment.source?.canvasAssignmentId || "") ===
+            String(value.capture.assignment.canvasId || "") ||
+          assignment.title === value.capture.assignment.title
+        )?.id || ""
+      : "";
+    renderAll();
+    navigateToView("courses", { persist: false });
+    showStatus(
+      value.capture.assignment
+        ? `Imported ${value.capture.assignment.title} into ${course.code || course.name}.`
+        : `Updated the syllabus for ${course.code || course.name}.`,
+      "success"
+    );
+    return true;
+  } catch (error) {
+    showStatus(
+      (error.message || "The Canvas page import failed.") +
+        " Return to Canvas and use the ClassPilot extension again.",
+      "warn"
+    );
+    return false;
+  }
+}
+
 function renderDataView() {
   const assignmentCount = workspace.courses.reduce(
     (total, course) => total + (course.assignments || []).length,
@@ -3815,6 +3921,7 @@ function initialize() {
     showStatus("Workspace ready. Your course data stays in this browser.");
   }
   void refreshCanvasStatus();
+  void redeemPendingCanvasImport();
 }
 
 document.addEventListener("click", handleDocumentClick);

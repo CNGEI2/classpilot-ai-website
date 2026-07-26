@@ -3446,6 +3446,17 @@ test("Canvas OAuth completion performs one read-only sync into stable course rec
   assert.match(app.document.elements.get("canvasStatus").textContent, /Connected to sfbu\.instructure\.com/);
 });
 
+test("startup redeems an extension import once without persisting its handoff code", () => {
+  assert.match(appSource, /function redeemPendingCanvasImport\s*\(/);
+  assert.match(appSource, /decodeURIComponent\(match\[1\]/);
+  assert.match(html, /classpilot-import-endpoint[^>]*\/api\/import-handoffs/);
+  assert.match(appSource, /importHandoffEndpoint\s*\+\s*"\/redeem"/);
+  assert.match(appSource, /mergeCanvasCapture\(workspace,\s*value\.capture/);
+  assert.match(appSource, /history\.replaceState/);
+  assert.match(appSource, /void redeemPendingCanvasImport\(\)/);
+  assert.doesNotMatch(appSource, /localStorage\.setItem\([^)]*(?:handoff|importCode)/i);
+});
+
 test("This week excludes overdue work while Today still shows it in Now", () => {
   const app = runApp({
     workspaceRaw: JSON.stringify(createWorkspace([{
