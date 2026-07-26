@@ -595,12 +595,22 @@ function extractOutputText(value) {
 }
 
 function normalizeLiveResponse(value, sources = []) {
-  let parsed;
+  const rawText = cleanText(extractOutputText(value), 12000);
+  let parsed = null;
   try {
-    parsed = JSON.parse(extractOutputText(value));
+    parsed = JSON.parse(rawText.replace(/^```(?:json)?\s*|\s*```$/gi, ""));
   } catch (_error) {
-    throw publicError("invalid_upstream_response", "The AI Coach returned an invalid response.", 502);
+    const start = rawText.indexOf("{");
+    const end = rawText.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try {
+        parsed = JSON.parse(rawText.slice(start, end + 1));
+      } catch (_nestedError) {
+        parsed = null;
+      }
+    }
   }
+  if (!parsed) parsed = { answer: rawText, evidence: [], nextSteps: [], missingInformation: [] };
   const answer = cleanText(parsed?.answer, 8000);
   if (!answer) throw publicError("invalid_upstream_response", "The AI Coach returned an invalid response.", 502);
   const sourceMap = new Map(sources.map((source) => [source.id, source]));

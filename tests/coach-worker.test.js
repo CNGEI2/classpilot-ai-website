@@ -244,6 +244,29 @@ test("Workers AI mode falls back to trusted assignment evidence when the model o
   assert.doesNotMatch(value.missingInformation.join(" "), /citation/i);
 });
 
+test("Workers AI mode safely accepts a plain conversational answer when JSON formatting drifts", async () => {
+  const { handleCoachRequest } = await workerModule();
+  const response = await handleCoachRequest(request(), {
+    ...baseEnv,
+    COACH_MODE: "workers_ai",
+    AI: {
+      async run() {
+        return {
+          choices: [{ message: { content: "Start with the ethical dilemma, then connect it to a possible solution." } }],
+          usage: { prompt_tokens: 70, completion_tokens: 22 }
+        };
+      }
+    }
+  });
+  const value = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(value.mode, "live");
+  assert.match(value.answer, /ethical dilemma/i);
+  assert.equal(value.evidence[0].sourceId, "assignment:future-care:requirement:1");
+  assert.deepEqual(value.nextSteps, []);
+});
+
 test("live mode sends a hardened structured request and normalizes usage", async () => {
   const { handleCoachRequest } = await workerModule();
   let upstream;
