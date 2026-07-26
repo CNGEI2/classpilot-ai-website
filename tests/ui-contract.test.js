@@ -233,6 +233,8 @@ class FakeElement {
       this.dataset.openCoach !== undefined) return this;
     if (selector === "[data-coach-action]" &&
       this.dataset.coachAction !== undefined) return this;
+    if (selector === "[data-coach-step-feedback]" &&
+      this.dataset.coachStepFeedback !== undefined) return this;
     if (selector === "[data-coach-source-id]" &&
       this.dataset.coachSourceId !== undefined) return this;
     if (selector === "[data-add-coach-task]" &&
@@ -4504,14 +4506,20 @@ test("the Coach runtime loads before app.js and exposes the complete conversatio
   assert.match(appSource, /buildCoachContext/);
   assert.match(appSource, /createThreadStore/);
   assert.match(appSource, /coachQuickActionButton\("explain"/);
+  assert.match(appSource, /Help me start/);
+  assert.match(appSource, /I&#039;m stuck|I' m stuck|I’m stuck|I\'m stuck/);
+  assert.match(appSource, /Check my idea/);
   assert.match(appSource, /coachQuickActionButton\("check"/);
-  assert.match(appSource, /coachQuickActionButton\("plan"/);
   assert.match(appSource, /data-coach-form/);
   assert.match(appSource, /data-coach-stop/);
   assert.match(appSource, /data-coach-clear/);
   assert.match(appSource, /data-coach-language/);
   assert.match(appSource, /data-coach-source-id/);
   assert.match(appSource, /data-add-coach-task/);
+  assert.match(appSource, /data-coach-step-feedback="done"/);
+  assert.match(appSource, /data-coach-step-feedback="stuck"/);
+  assert.match(appSource, /data-coach-step-feedback="check"/);
+  assert.match(appSource, /function sendCoachStepFeedback/);
   assert.match(appSource, /function addCoachStepAsTask/);
   assert.match(appSource, /class="coach-bubble"/);
   assert.match(appSource, /coach-typing-indicator/);
@@ -4520,10 +4528,76 @@ test("the Coach runtime loads before app.js and exposes the complete conversatio
   assert.match(css, /\.coach-message\.is-user\s*\{[^}]*justify-items:\s*end/s);
   assert.match(css, /\.coach-message\.is-assistant\s*\{[^}]*justify-items:\s*start/s);
   assert.match(css, /\.coach-typing-dot/);
+  assert.match(css, /\.coach-current-step\s*\{/);
+  assert.match(css, /\.coach-step-actions\s*\{/);
   assert.match(css, /\.coach-bubble\s*\{[^}]*box-sizing:\s*border-box/s);
   assert.match(css, /@media \(max-width:\s*520px\)[\s\S]*\.coach-message\s*\{[^}]*width:\s*100%/s);
   assert.match(css, /@media \(max-width:\s*520px\)[\s\S]*\.coach-message\.is-assistant \.coach-bubble\s*\{[^}]*width:\s*100%/s);
   assert.match(appSource, /Selected course context is sent only when you ask/);
+});
+
+test("Coach renders one adaptive step instead of a generic step list", () => {
+  const app = runApp({
+    workspaceRaw: JSON.stringify(createWorkspace([editableCourse()]))
+  });
+  const markup = app.context.renderCoachMessage({
+    role: "assistant",
+    text: "Choose the requirement that is least clear.",
+    phase: "understand",
+    currentStep: {
+      id: "choose-requirement",
+      title: "Choose one requirement",
+      instruction: "Select the requirement you understand least.",
+      doneWhen: "You can name it and explain what is unclear.",
+      estimatedMinutes: 8
+    },
+    checkpointQuestion: "Which requirement did you choose?",
+    waitingForStudent: true,
+    missingInformation: ["The instructor's example is not in the uploaded material."],
+    evidence: []
+  }, "course-1", "assignment-1");
+
+  assert.match(markup, /coach-current-step/);
+  assert.match(markup, /Understanding/);
+  assert.match(markup, /Choose one requirement/);
+  assert.match(markup, /Select the requirement you understand least/);
+  assert.match(markup, /You can name it and explain what is unclear/);
+  assert.match(markup, /8 min/);
+  assert.match(markup, /Which requirement did you choose/);
+  assert.match(markup, /The instructor&#039;s example is not in the uploaded material/);
+  assert.match(markup, /data-coach-step-feedback="done"/);
+  assert.match(markup, /data-coach-step-feedback="stuck"/);
+  assert.match(markup, /data-coach-step-feedback="check"/);
+  assert.match(markup, /data-add-coach-task/);
+  assert.doesNotMatch(markup, /coach-next-steps|<ol>/);
+});
+
+test("Coach step feedback creates one contextual student response", () => {
+  const step = {
+    id: "find-source",
+    title: "Find one source",
+    instruction: "Choose one source about the 2008 crisis."
+  };
+
+  assert.equal(
+    appFeedback("done", step),
+    'I completed "Find one source". Help me reflect on it and give me only the next small step.'
+  );
+  assert.equal(
+    appFeedback("stuck", step),
+    'I am stuck on "Find one source". Make this same step smaller and give me one hint.'
+  );
+  assert.equal(
+    appFeedback("check", step),
+    'Here is my work for "Find one source": '
+  );
+
+  function appFeedback(kind, currentStep) {
+    const app = runApp({
+      workspaceRaw: JSON.stringify(createWorkspace([editableCourse()]))
+    });
+    return app.context.coachStepFeedbackMessage(kind, currentStep);
+  }
 });
 
 test("Coach next steps become duplicate-safe tasks on only the selected assignment", () => {
@@ -4610,6 +4684,10 @@ test("mock Coach conversations are clearly labeled and separated by assignment",
   assert.equal(second.length, 2);
   assert.match(first[1].text, /Mock mode/);
   assert.equal(first[1].mode, "mock");
+  assert.equal(first[1].phase, "understand");
+  assert.equal(first[1].currentStep.id, "mock-current-step");
+  assert.equal(first[1].waitingForStudent, true);
+  assert.equal("nextSteps" in first[1], false);
   assert.doesNotMatch(JSON.stringify(first), /Second lab/);
 });
 

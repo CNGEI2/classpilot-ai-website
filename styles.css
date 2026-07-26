@@ -1297,7 +1297,7 @@ h3 {
 
 .coach-quick-actions {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin: 18px 0;
 }
@@ -1428,7 +1428,7 @@ h3 {
 }
 
 .coach-evidence,
-.coach-next-steps {
+.coach-missing-information {
   max-width: 100%;
   margin-top: 6px;
   padding: 12px 14px;
@@ -1471,13 +1471,8 @@ h3 {
   30% { opacity: 1; transform: translateY(-3px); }
 }
 
-.coach-next-steps {
-  border-left-color: var(--teal);
-  background: rgba(22, 118, 111, 0.06);
-}
-
 .coach-evidence ul,
-.coach-next-steps ol {
+.coach-missing-information ul {
   margin-top: 6px !important;
   padding-left: 18px !important;
 }
@@ -1525,13 +1520,142 @@ h3 {
   overflow-wrap: anywhere;
 }
 
-.coach-next-steps li {
-  min-width: 0;
-  margin-bottom: 7px;
+.coach-missing-information {
+  border-left-color: var(--coral);
+  background: rgba(201, 85, 69, 0.06);
 }
 
-.coach-next-steps li > span {
+.coach-missing-information strong {
+  color: var(--danger);
+}
+
+.coach-missing-information li + li {
+  margin-top: 4px;
+}
+
+.coach-current-step {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  max-width: 100%;
+  margin-top: 12px;
+  padding: 13px 14px 14px 17px;
+  border-top: 1px solid rgba(22, 118, 111, 0.24);
+  border-right: 1px solid rgba(22, 118, 111, 0.24);
+  border-bottom: 1px solid rgba(22, 118, 111, 0.24);
+  border-left: 4px solid var(--teal);
+  background: rgba(22, 118, 111, 0.055);
+}
+
+.coach-step-header,
+.coach-step-title-row,
+.coach-step-actions,
+.coach-checkpoint {
+  display: flex;
+  align-items: center;
+}
+
+.coach-step-header {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.coach-phase {
+  color: var(--teal);
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.coach-step-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.67rem;
+  font-weight: 700;
+}
+
+.coach-step-time svg {
+  width: 14px;
+  height: 14px;
+}
+
+.coach-step-title-row {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.coach-step-title-row h3 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
+.coach-step-instruction,
+.coach-done-when p,
+.coach-checkpoint p {
+  margin: 0;
   overflow-wrap: anywhere;
+}
+
+.coach-step-instruction {
+  color: var(--ink-2);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.coach-done-when {
+  padding: 8px 10px;
+  border-left: 3px solid var(--gold);
+  background: rgba(199, 148, 25, 0.08);
+  color: var(--ink-2);
+  font-size: 0.78rem;
+}
+
+.coach-done-when strong,
+.coach-checkpoint strong {
+  display: block;
+  margin-bottom: 2px;
+  color: #7c5a09;
+  font-size: 0.64rem;
+  text-transform: uppercase;
+}
+
+.coach-checkpoint {
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 0.8rem;
+}
+
+.coach-checkpoint.is-standalone {
+  max-width: 100%;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--teal);
+  background: rgba(22, 118, 111, 0.055);
+}
+
+.coach-checkpoint svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  margin-top: 2px;
+  color: var(--teal);
+}
+
+.coach-step-actions {
+  flex-wrap: wrap;
+  gap: 7px;
+  padding-top: 2px;
+}
+
+.coach-step-actions button {
+  min-height: 34px;
+  padding: 6px 9px;
+  font-size: 0.72rem;
 }
 
 .coach-add-task {
@@ -1539,7 +1663,7 @@ h3 {
   gap: 5px;
   align-items: center;
   min-height: 30px;
-  margin-top: 5px;
+  margin-top: 0;
   padding: 4px 8px;
   border-color: rgba(22, 118, 111, 0.3);
   border-radius: 6px;
@@ -2400,15 +2524,31 @@ dialog form > div {
   .coach-bubble,
   .coach-bubble > *,
   .coach-evidence,
-  .coach-next-steps,
+  .coach-missing-information,
+  .coach-current-step,
   .coach-citation {
     min-width: 0;
     overflow-wrap: anywhere;
   }
 
   .coach-evidence,
-  .coach-next-steps {
+  .coach-missing-information,
+  .coach-current-step {
     padding: 10px;
+  }
+
+  .coach-step-title-row {
+    align-items: flex-start;
+  }
+
+  .coach-step-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .coach-step-actions button {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .workspace {

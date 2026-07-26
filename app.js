@@ -62,10 +62,19 @@ const NAV_ITEMS = [
 ];
 const COURSE_COLORS = ["#376f92", "#16766f", "#c95545", "#705b8f", "#c79419"];
 const COACH_QUICK_ACTIONS = {
-  explain: "Explain this assignment and show me the exact requirements.",
-  chat: "What should I do next?",
-  check: "Check which requirements I still need to complete.",
-  plan: "Make a practical plan for completing this work."
+  explain: "I do not know how to start. Help me find only the first small step.",
+  chat: "I am stuck. Ask what is blocking me, then make the current step smaller.",
+  check: "I want to check an idea. Ask me to share it, then review one issue at a time."
+};
+const COACH_PHASE_LABELS = {
+  diagnose: "Finding your starting point",
+  understand: "Understanding",
+  research: "Researching",
+  ideate: "Developing your idea",
+  outline: "Structuring",
+  draft: "Drafting",
+  review: "Reviewing",
+  complete: "Complete"
 };
 const coachEndpoint = document
   .querySelector('meta[name="classpilot-coach-endpoint"]')
@@ -1372,10 +1381,9 @@ function renderCoach(course) {
           "</dl>"
         : '<p class="coach-course-context">Course-level guidance uses only this course\'s syllabus summary.</p>') +
       '<div class="coach-quick-actions" role="group" aria-label="Coach quick questions">' +
-        coachQuickActionButton("explain", "list-checks", "Explain assignment") +
-        coachQuickActionButton("chat", "arrow-right", "What next?") +
-        coachQuickActionButton("check", "scan-search", "Check requirements") +
-        coachQuickActionButton("plan", "calendar-clock", "Make a plan") +
+        coachQuickActionButton("explain", "sparkles", "Help me start") +
+        coachQuickActionButton("chat", "life-buoy", "I'm stuck") +
+        coachQuickActionButton("check", "scan-search", "Check my idea") +
       "</div>" +
       '<div class="coach-transcript" data-coach-transcript aria-live="polite"' +
         ' aria-label="Coach conversation">' +
@@ -1432,6 +1440,47 @@ function coachLanguageOption(value, label, selected) {
     (value === selected ? " selected" : "") + ">" + label + "</option>";
 }
 
+function renderCoachCurrentStep(message, courseId, assignmentId) {
+  const step = message.currentStep;
+  if (!step || typeof step !== "object") return "";
+  const phase = COACH_PHASE_LABELS[message.phase] || COACH_PHASE_LABELS.diagnose;
+  const estimate = Number(step.estimatedMinutes) > 0
+    ? '<span class="coach-step-time"><i data-lucide="clock-3" aria-hidden="true"></i>' +
+        escapeHtml(step.estimatedMinutes) + " min</span>"
+    : "";
+  const doneWhen = step.doneWhen
+    ? '<div class="coach-done-when"><strong>Done when</strong><p>' +
+        escapeHtml(step.doneWhen) + "</p></div>"
+    : "";
+  const checkpoint = message.checkpointQuestion
+    ? '<div class="coach-checkpoint"><i data-lucide="message-circle-question" aria-hidden="true"></i>' +
+        '<div><strong>Your checkpoint</strong><p>' +
+          escapeHtml(message.checkpointQuestion) + "</p></div></div>"
+    : "";
+  const addTask = assignmentId
+    ? '<button type="button" class="coach-add-task" data-add-coach-task' +
+        ' data-course-id="' + escapeHtml(courseId) + '" data-assignment-id="' +
+        escapeHtml(assignmentId) + '" data-task-title="' + escapeHtml(step.title) +
+        '" aria-label="Add this Coach step to assignment tasks">' +
+        '<i data-lucide="plus" aria-hidden="true"></i><span>Add task</span></button>'
+    : "";
+  return '<section class="coach-current-step" aria-label="Current learning step">' +
+    '<header class="coach-step-header"><span class="coach-phase">' + escapeHtml(phase) +
+      "</span>" + estimate + "</header>" +
+    '<div class="coach-step-title-row"><h3>' + escapeHtml(step.title) + "</h3>" + addTask + "</div>" +
+    '<p class="coach-step-instruction">' + escapeHtml(step.instruction) + "</p>" +
+    doneWhen + checkpoint +
+    '<div class="coach-step-actions" role="group" aria-label="Respond to this Coach step">' +
+      '<button type="button" data-coach-step-feedback="done">' +
+        '<i data-lucide="circle-check" aria-hidden="true"></i><span>Done, continue</span></button>' +
+      '<button type="button" data-coach-step-feedback="stuck">' +
+        '<i data-lucide="life-buoy" aria-hidden="true"></i><span>I&#039;m stuck</span></button>' +
+      '<button type="button" data-coach-step-feedback="check">' +
+        '<i data-lucide="scan-search" aria-hidden="true"></i><span>Check my idea</span></button>' +
+    "</div>" +
+  "</section>";
+}
+
 function renderCoachMessage(message, courseId = "", assignmentId = "") {
   const assistant = message.role === "assistant";
   const evidence = assistant && Array.isArray(message.evidence) && message.evidence.length
@@ -1451,17 +1500,18 @@ function renderCoachMessage(message, courseId = "", assignmentId = "") {
                 escapeHtml(item.excerpt || item.text) + "</li>"
         )).join("") + "</ul></div>"
     : "";
-  const nextSteps = assistant && Array.isArray(message.nextSteps) && message.nextSteps.length
-    ? '<div class="coach-next-steps"><strong>Next steps</strong><ol>' +
-        message.nextSteps.map((item) => "<li><span>" + escapeHtml(item) + "</span>" +
-          (assignmentId
-            ? '<button type="button" class="coach-add-task" data-add-coach-task' +
-                ' data-course-id="' + escapeHtml(courseId) + '" data-assignment-id="' +
-                escapeHtml(assignmentId) + '" data-task-title="' + escapeHtml(item) +
-                '" aria-label="Add this Coach step to assignment tasks">' +
-                '<i data-lucide="plus" aria-hidden="true"></i><span>Add task</span></button>'
-            : "") + "</li>").join("") +
-      "</ol></div>"
+  const currentStep = assistant
+    ? renderCoachCurrentStep(message, courseId, assignmentId)
+    : "";
+  const checkpoint = assistant && !message.currentStep && message.checkpointQuestion
+    ? '<div class="coach-checkpoint is-standalone"><i data-lucide="message-circle-question" aria-hidden="true"></i>' +
+        '<div><strong>Your turn</strong><p>' + escapeHtml(message.checkpointQuestion) + "</p></div></div>"
+    : "";
+  const missingInformation = assistant && Array.isArray(message.missingInformation) &&
+      message.missingInformation.length
+    ? '<div class="coach-missing-information"><strong>Not found in your course material</strong><ul>' +
+        message.missingInformation.map((item) => "<li>" + escapeHtml(item) + "</li>").join("") +
+      "</ul></div>"
     : "";
   const mode = assistant && message.mode === "mock"
     ? '<span class="coach-message-mode">Mock</span>'
@@ -1472,7 +1522,7 @@ function renderCoachMessage(message, courseId = "", assignmentId = "") {
         (assistant ? "CP" : "YOU") + '</span><strong>' +
         (assistant ? "ClassPilot Coach" : "You") + "</strong>" + mode + "</header>" +
       '<p class="coach-message-text">' + escapeHtml(message.text) + "</p>" +
-      evidence + nextSteps +
+      evidence + missingInformation + currentStep + checkpoint +
     "</div>" +
   "</article>";
 }
@@ -1550,10 +1600,20 @@ function buildLocalMockCoachResponse(course, assignment, action, sourceCatalog =
     plan: "Work through the next steps in order and mark each one complete.",
     chat: "Start with the first incomplete step, then check the original instructions again."
   }[action] || "Use the uploaded instructions as your source of truth.";
+  const nextStep = guidanceSteps[0] || detailRequirements[0] || "Review the uploaded instructions.";
   return {
     answer: "Mock mode: " + (guidance.summary || guidance.title || actionLead) + " " + actionLead,
+    phase: assignment ? "understand" : "diagnose",
+    currentStep: {
+      id: "mock-current-step",
+      title: assignment ? "Complete the first requirement" : "Choose one course question",
+      instruction: nextStep,
+      doneWhen: "You can tell the Coach what you completed or discovered.",
+      estimatedMinutes: 10
+    },
+    checkpointQuestion: "What did you complete or discover in this step?",
+    waitingForStudent: true,
     evidence,
-    nextSteps: guidanceSteps.slice(0, 5),
     missingInformation: detailRequirements.length || !assignment
       ? []
       : ["No assignment requirements were detected."],
@@ -1604,8 +1664,11 @@ async function submitCoachQuestion(course, assignment, question, action = "chat"
     coachThreadStore.append(course.id, assignmentId, {
       role: "assistant",
       text: response.answer,
+      phase: response.phase,
+      currentStep: response.currentStep,
+      checkpointQuestion: response.checkpointQuestion,
+      waitingForStudent: response.waitingForStudent,
       evidence: response.evidence,
-      nextSteps: response.nextSteps,
       missingInformation: response.missingInformation,
       mode: response.mode,
       timestamp: new Date().toISOString()
@@ -1714,6 +1777,49 @@ function clearCoachConversation() {
   renderCoursesView();
   refreshIcons();
   showStatus("This Coach conversation was cleared.", "success");
+  return true;
+}
+
+function coachStepFeedbackMessage(kind, currentStep) {
+  const title = String(currentStep?.title || "this step").replace(/\s+/g, " ").trim();
+  if (kind === "done") {
+    return 'I completed "' + title +
+      '". Help me reflect on it and give me only the next small step.';
+  }
+  if (kind === "stuck") {
+    return 'I am stuck on "' + title +
+      '". Make this same step smaller and give me one hint.';
+  }
+  if (kind === "check") return 'Here is my work for "' + title + '": ';
+  return "";
+}
+
+function latestActiveCoachStep(courseId, assignmentId) {
+  const messages = coachThreadStore?.get(courseId, assignmentId) || [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].role === "assistant" && messages[index].currentStep) {
+      return messages[index].currentStep;
+    }
+  }
+  return null;
+}
+
+function sendCoachStepFeedback(kind) {
+  const course = getActiveCourse();
+  if (!course) return false;
+  const target = coachTarget(course);
+  const currentStep = latestActiveCoachStep(course.id, target.assignmentId);
+  const message = coachStepFeedbackMessage(kind, currentStep);
+  if (!currentStep || !message) return false;
+  if (kind === "check") {
+    const composer = elements.courseWorkspace?.querySelector?.('[name="coachQuestion"]');
+    if (!composer) return false;
+    composer.value = message;
+    composer.focus();
+    showStatus("Share your idea, then send it to Coach.", "info");
+    return true;
+  }
+  void submitCoachQuestion(course, target.assignment, message, "chat");
   return true;
 }
 
@@ -3859,6 +3965,12 @@ function handleDocumentClick(event) {
       coachTask.dataset.assignmentId,
       coachTask.dataset.taskTitle
     );
+    return;
+  }
+
+  const coachStepFeedback = event.target.closest("[data-coach-step-feedback]");
+  if (coachStepFeedback) {
+    sendCoachStepFeedback(coachStepFeedback.dataset.coachStepFeedback);
     return;
   }
 
