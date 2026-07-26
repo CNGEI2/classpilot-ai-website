@@ -2,6 +2,8 @@
 
 This Worker is the security boundary between the public GitHub Pages frontend and the OpenAI Responses API. It accepts only `POST /api/coach`, validates a bounded selected-course payload, applies origin and rate limits, and never returns secrets or raw upstream errors.
 
+Each request may include a bounded source catalog generated from only the selected course and assignment. Both mock and live responses use evidence objects with `sourceId`, `label`, `excerpt`, and `location`. The Worker drops evidence whose source ID is absent from the request and replaces mismatched excerpts with trusted source text. The live prompt requires source IDs for factual course claims and places unknown information in `missingInformation`.
+
 ## Modes
 
 - `COACH_MODE=mock` returns deterministic, visibly labeled test guidance without an OpenAI request.

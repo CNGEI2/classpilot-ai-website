@@ -24,6 +24,8 @@ Today uses a deterministic planning score that combines overdue and remaining ti
 
 Open an assignment and choose **Ask Coach** to carry that exact assignment into the Coach tab. Quick questions explain the assignment, identify the next step, check requirements, or make a plan. Responses show the course evidence they rely on, and English, Chinese, and bilingual modes are available.
 
+Coach evidence is built from a bounded source catalog for only the selected course and assignment. Live responses must return a valid source ID; citations with invented IDs are removed by the Worker, while accepted citations show the original source location and excerpt. Select a citation to return to its course or assignment context. Assignment-level Coach next steps include **Add task**, which adds an editable, duplicate-safe task only to that assignment.
+
 The static site never contains an OpenAI API key. Coach requests go through the deployed Cloudflare Worker at `https://classpilot-ai-coach.cngei2-classpilot.workers.dev/api/coach`, which validates the origin and payload, removes unexpected fields, applies request limits, and calls the OpenAI Responses API with `store: false` in live mode. The public deployment currently uses visibly labeled Mock mode until an `OPENAI_API_KEY` Worker secret is configured.
 
 For interface testing without an API key, open the site with `?coach=mock`. Mock mode is visibly labeled and returns deterministic local guidance; it never claims to be a live AI response.
@@ -54,6 +56,6 @@ npm run check
 npm run verify
 ```
 
-The GitHub Pages workflow runs `npm ci`, then `npm run verify`, and packages the exact static runtime files (`index.html`, `app.js`, `logic.js`, `planner.js`, `file-readers.js`, `coach.js`, `styles.css`, `vendor/`, and `.nojekyll`) into a fresh Pages artifact on every deployment.
+The GitHub Pages workflow runs `npm ci`, then `npm run verify`, and packages the exact static runtime files (`index.html`, `app.js`, `logic.js`, `planner.js`, `file-readers.js`, `source-evidence.js`, `coach.js`, `styles.css`, `vendor/`, and `.nojekyll`) into a fresh Pages artifact on every deployment.
 
 See [`worker/README.md`](worker/README.md) for secure Coach backend deployment and live-mode configuration.
