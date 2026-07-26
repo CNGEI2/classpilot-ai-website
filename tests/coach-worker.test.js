@@ -159,7 +159,7 @@ test("Workers AI mode sends a bounded multi-turn chat and normalizes its respons
     {
       ...baseEnv,
       COACH_MODE: "workers_ai",
-      WORKERS_AI_MODEL: "@cf/zai-org/glm-4.7-flash",
+      WORKERS_AI_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast",
       AI: {
         async run(model, options) {
           invocation = { model, options };
@@ -190,7 +190,7 @@ test("Workers AI mode sends a bounded multi-turn chat and normalizes its respons
   assert.equal(response.status, 200);
   assert.equal(value.mode, "live");
   assert.deepEqual(value.usage, { inputTokens: 245, outputTokens: 76 });
-  assert.equal(invocation.model, "@cf/zai-org/glm-4.7-flash");
+  assert.equal(invocation.model, "@cf/meta/llama-3.1-8b-instruct-fast");
   assert.equal(invocation.options.response_format.type, "json_object");
   assert.equal(invocation.options.messages.at(-1).role, "user");
   assert.match(invocation.options.messages.at(-1).content, /What do I need to do/);
@@ -202,7 +202,7 @@ test("Workers AI mode reports a stable configuration error without its binding",
   const response = await handleCoachRequest(request(), {
     ...baseEnv,
     COACH_MODE: "workers_ai",
-    WORKERS_AI_MODEL: "@cf/zai-org/glm-4.7-flash"
+    WORKERS_AI_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast"
   });
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), {
@@ -217,7 +217,8 @@ test("Workers AI mode falls back to trusted assignment evidence when the model o
     ...baseEnv,
     COACH_MODE: "workers_ai",
     AI: {
-      async run(_model, options) {
+      async run(model, options) {
+        assert.equal(model, "@cf/meta/llama-3.1-8b-instruct-fast");
         assert.equal(options.chat_template_kwargs, undefined);
         return {
           choices: [{ message: { content: JSON.stringify({

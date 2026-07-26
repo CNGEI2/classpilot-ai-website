@@ -18,7 +18,7 @@ The checked-in `wrangler.toml` contains only non-secret deployment settings:
 [vars]
 ALLOWED_ORIGIN = "https://cngei2.github.io"
 COACH_MODE = "workers_ai"
-WORKERS_AI_MODEL = "@cf/zai-org/glm-4.7-flash"
+WORKERS_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast"
 OPENAI_MODEL = "gpt-5-mini"
 ENVIRONMENT = "production"
 
