@@ -4438,6 +4438,9 @@ test("the Coach runtime loads before app.js and exposes the complete conversatio
   assert.match(css, /\.coach-message\.is-user\s*\{[^}]*justify-items:\s*end/s);
   assert.match(css, /\.coach-message\.is-assistant\s*\{[^}]*justify-items:\s*start/s);
   assert.match(css, /\.coach-typing-dot/);
+  assert.match(css, /\.coach-bubble\s*\{[^}]*box-sizing:\s*border-box/s);
+  assert.match(css, /@media \(max-width:\s*520px\)[\s\S]*\.coach-message\s*\{[^}]*width:\s*100%/s);
+  assert.match(css, /@media \(max-width:\s*520px\)[\s\S]*\.coach-message\.is-assistant \.coach-bubble\s*\{[^}]*width:\s*100%/s);
   assert.match(appSource, /Selected course context is sent only when you ask/);
 });
 

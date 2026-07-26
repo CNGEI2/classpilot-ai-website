@@ -1368,6 +1368,7 @@ h3 {
 }
 
 .coach-bubble {
+  box-sizing: border-box;
   width: fit-content;
   max-width: min(84%, 780px);
   min-width: 0;
@@ -2317,6 +2318,38 @@ dialog form > div {
 }
 
 @media (max-width: 520px) {
+  .coach-transcript {
+    padding: 10px 7px;
+  }
+
+  .coach-message {
+    width: 100%;
+    padding: 6px 0;
+  }
+
+  .coach-message.is-assistant .coach-bubble {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .coach-message.is-user .coach-bubble {
+    max-width: 88%;
+  }
+
+  .coach-bubble,
+  .coach-bubble > *,
+  .coach-evidence,
+  .coach-next-steps,
+  .coach-citation {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .coach-evidence,
+  .coach-next-steps {
+    padding: 10px;
+  }
+
   .workspace {
     width: 100%;
     min-width: 0;
