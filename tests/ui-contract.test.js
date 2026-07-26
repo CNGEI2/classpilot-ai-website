@@ -5,6 +5,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const coach = require("../coach.js");
 const sourceEvidence = require("../source-evidence.js");
+const submissionChecker = require("../submission-checker.js");
 const logic = require("../logic.js");
 const planner = require("../planner.js");
 
@@ -646,6 +647,7 @@ function runApp({
     ClassPilotFileReaders: fileReaderApi,
     ClassPilotCoach: coach,
     ClassPilotSourceEvidence: sourceEvidence,
+    ClassPilotSubmissionChecker: submissionChecker,
     ClassPilotLogic: logicApi,
     ClassPilotPlanner: planner,
     console: {
@@ -3272,6 +3274,47 @@ test("Today assignment activation renders the selected assignment in Courses", (
   assert.doesNotMatch(detail, /<img src=x/);
   assert.match(detail, /&lt;img src=x onerror=&quot;alert\(4\)&quot;&gt;/);
   assert.match(app.document.elements.get("appStatus").textContent, /^Opened /);
+});
+
+test("a submission upload is checked once and saves only the compact report", async () => {
+  const app = runApp({
+    workspaceRaw: JSON.stringify(createWorkspace([{
+      id: "course-1",
+      code: "AI450",
+      name: "AI in Society",
+      assignments: [{
+        id: "paper",
+        title: "Satoshi Paper",
+        dueAt: new Date(Date.now() + 86400000).toISOString(),
+        details: {
+          deliverables: ["Main Report (4-5 pages)", "Bibliography"],
+          rubric: [{ label: "Strategic Insight Beyond AI", weight: "35%" }]
+        },
+        tasks: []
+      }]
+    }]))
+  });
+  const assignmentButton = app.document.elements.get("todayView").children
+    .find((button) => button.dataset.assignmentId === "paper");
+  app.document.dispatchClick(assignmentButton);
+  const input = app.document.elements.get("courseWorkspace").children
+    .find((control) => control.dataset.submissionFile !== undefined);
+  const file = {
+    name: "Satoshi Paper.txt",
+    type: "text/plain",
+    size: 1200,
+    text: async () => "Strategic insight and original analysis. Bibliography. Interview evidence."
+  };
+  input.files = [file];
+
+  await app.document.elements.get("courseWorkspace").dispatch("change", { target: input });
+
+  const saved = persistedWorkspace(app).courses[0].assignments[0].submissionReport;
+  assert.equal(saved.file.name, "Satoshi Paper.txt");
+  assert.equal(saved.file.size, 1200);
+  assert.equal(Object.hasOwn(saved, "text"), false);
+  assert.equal(Object.hasOwn(saved.file, "text"), false);
+  assert.match(app.document.elements.get("courseWorkspace").innerHTML, /ClassPilot estimate/);
 });
 
 test("This week excludes overdue work while Today still shows it in Now", () => {

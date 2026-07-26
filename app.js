@@ -32,6 +32,7 @@ const {
   buildSourceCatalog,
   findSourceRecord
 } = window.ClassPilotSourceEvidence;
+const { analyzeSubmission } = window.ClassPilotSubmissionChecker;
 const {
   buildCoachContext,
   coachThreadKey,
@@ -735,6 +736,95 @@ function renderAssignmentMetadata(assignment) {
   ).join("") + "</dl>";
 }
 
+function renderSubmissionReport(report) {
+  if (!report || typeof report !== "object") {
+    return '<p class="empty-state light">No file checked yet.</p>';
+  }
+  const file = report.file && typeof report.file === "object" ? report.file : {};
+  const checks = Array.isArray(report.checks) ? report.checks : [];
+  const rubric = Array.isArray(report.rubric) ? report.rubric : [];
+  const estimate = report.scoreEstimate && typeof report.scoreEstimate === "object"
+    ? report.scoreEstimate
+    : {};
+  const aiRisk = report.aiRisk && typeof report.aiRisk === "object"
+    ? report.aiRisk
+    : {};
+  const metric = file.pageCount
+    ? file.pageCount + " pages"
+    : file.slideCount
+      ? file.slideCount + " slides"
+      : file.wordCount + " words";
+  const rows = [...checks, ...rubric].map((item) => {
+    const status = item.status === "found"
+      ? "pass"
+      : item.status === "partial"
+        ? "warn"
+        : item.status === "missing"
+          ? "fail"
+          : ["pass", "warn", "fail"].includes(item.status)
+            ? item.status
+            : "warn";
+    return (
+      '<li class="submission-check-row is-' + status + '">' +
+        '<i data-lucide="' + (status === "pass" ? "check-circle-2" :
+          status === "fail" ? "x-circle" : "alert-circle") +
+          '" aria-hidden="true"></i>' +
+        "<span><strong>" + escapeHtml(item.label || "Check") + "</strong>" +
+          "<small>" + escapeHtml(item.detail || item.evidence || "Review needed.") +
+          "</small></span>" +
+      "</li>"
+    );
+  }).join("");
+  const hasEstimate = Number.isFinite(Number(estimate.min)) &&
+    Number.isFinite(Number(estimate.max));
+  const aiPercentage = Number(aiRisk.score);
+  const hasAiScore = aiRisk.score !== null && aiRisk.score !== undefined &&
+    Number.isFinite(aiPercentage);
+  return (
+    '<div class="submission-report">' +
+      '<div class="submission-report-head">' +
+        '<span><strong>' + escapeHtml(file.name || "Checked file") + "</strong>" +
+          "<small>" + escapeHtml(metric) + "</small></span>" +
+        (hasEstimate
+          ? '<span class="score-estimate"><small>' +
+              escapeHtml(estimate.label || "ClassPilot estimate") +
+              "</small><strong>" + escapeHtml(estimate.min) + "-" +
+              escapeHtml(estimate.max) + "%</strong></span>"
+          : "") +
+      "</div>" +
+      (rows ? '<ul class="submission-checks">' + rows + "</ul>" : "") +
+      (hasAiScore
+        ? '<p class="ai-writing-note' + (aiPercentage > 20 ? " is-review" : "") +
+            '"><strong>AI-writing review: ' + escapeHtml(aiPercentage) + "%</strong> " +
+            escapeHtml(aiRisk.message || "This is not proof of AI use.") + "</p>"
+        : "") +
+    "</div>"
+  );
+}
+
+function renderSubmissionCheck(course, assignment) {
+  return (
+    '<section class="submission-check" aria-labelledby="submissionCheckHeading">' +
+      '<div class="section-heading-row">' +
+        '<h3 id="submissionCheckHeading">Final check</h3>' +
+        (assignment.submissionReport
+          ? '<button type="button" class="quiet-button" data-clear-submission-report' +
+              ' data-course-id="' + escapeHtml(course.id) + '" data-assignment-id="' +
+              escapeHtml(assignment.id) + '">Clear result</button>'
+          : "") +
+      "</div>" +
+      '<label class="submission-file-control">' +
+        '<i data-lucide="file-check-2" aria-hidden="true"></i>' +
+        '<span><strong>Choose submission file</strong><small>PDF, DOCX, PPTX, image, or text</small></span>' +
+        '<input type="file" data-submission-file data-course-id="' +
+          escapeHtml(course.id) + '" data-assignment-id="' +
+          escapeHtml(assignment.id) + '" accept=".pdf,.docx,.pptx,.png,.jpg,.jpeg,.webp,.txt,.md,.csv">' +
+      "</label>" +
+      renderSubmissionReport(assignment.submissionReport) +
+    "</section>"
+  );
+}
+
 function renderSelectedAssignmentDetail(course, assignment) {
   const requirements = assignment.details?.requirements || [];
   const deliverables = assignment.details?.deliverables || [];
@@ -771,10 +861,11 @@ function renderSelectedAssignmentDetail(course, assignment) {
           "No completion steps are recorded for this assignment."
         ) +
       "</section>" +
-      '<section aria-labelledby="selectedTasksHeading">' +
+      '<section class="assignment-checklist" aria-labelledby="selectedTasksHeading">' +
         '<h3 id="selectedTasksHeading">Checklist</h3>' +
         renderAssignmentTasks(course, assignment) +
       "</section>" +
+      renderSubmissionCheck(course, assignment) +
       '<div class="dialog-actions">' +
         '<button type="button" class="primary-action" data-open-coach' +
           ' data-course-id="' + escapeHtml(course.id) + '" data-assignment-id="' +
@@ -3022,6 +3113,67 @@ function selectAssignment(button) {
   return true;
 }
 
+async function checkSubmissionFile(input) {
+  const file = input.files?.[0];
+  if (!file) return false;
+  const courseId = input.dataset.courseId || "";
+  const assignmentId = input.dataset.assignmentId || "";
+  const assignment = findAssignment(courseId, assignmentId);
+  if (!assignment) {
+    showStatus("This assignment is no longer available.", "warn");
+    return false;
+  }
+
+  input.disabled = true;
+  showStatus("Checking " + file.name + " against this assignment...");
+  try {
+    const extraction = await readImportFile(file, {
+      ocrImage: recognizeImage,
+      onProgress(update) {
+        if (update.stage === "ocr" && Number.isFinite(update.progress)) {
+          showStatus("Reading " + file.name + ": " +
+            Math.round(update.progress * 100) + "%");
+        }
+      }
+    });
+    const report = analyzeSubmission(assignment, {
+      ...extraction,
+      fileName: file.name,
+      mimeType: file.type,
+      size: file.size
+    });
+    const nextWorkspace = updateAssignment(workspace, courseId, assignmentId, {
+      submissionReport: report
+    });
+    if (!commitWorkspace(nextWorkspace)) return false;
+    const needsReview = report.summary.fail > 0 ||
+      report.aiRisk.status === "review";
+    showStatus(
+      needsReview
+        ? "Check complete. Review the flagged items before submitting."
+        : "Check complete. No blocking issues were found.",
+      needsReview ? "warn" : "success"
+    );
+    return true;
+  } catch (error) {
+    showStatus(error?.message || "The submission file could not be checked.", "warn");
+    return false;
+  } finally {
+    input.disabled = false;
+  }
+}
+
+function clearSubmissionReport(courseId, assignmentId) {
+  const assignment = findAssignment(courseId, assignmentId);
+  if (!assignment?.submissionReport) return false;
+  const nextWorkspace = updateAssignment(workspace, courseId, assignmentId, {
+    submissionReport: null
+  });
+  if (!commitWorkspace(nextWorkspace)) return false;
+  showStatus("Submission check cleared.", "success");
+  return true;
+}
+
 function handleDocumentClick(event) {
   const dialogClose = event.target.closest("[data-dialog-close]");
   if (dialogClose) {
@@ -3076,6 +3228,15 @@ function handleDocumentClick(event) {
 
   if (event.target.closest("[data-coach-clear]")) {
     clearCoachConversation();
+    return;
+  }
+
+  const clearSubmission = event.target.closest("[data-clear-submission-report]");
+  if (clearSubmission) {
+    clearSubmissionReport(
+      clearSubmission.dataset.courseId,
+      clearSubmission.dataset.assignmentId
+    );
     return;
   }
 
@@ -3289,7 +3450,11 @@ elements.importDropZone.addEventListener("dragover", (event) => {
 });
 elements.importDropZone.addEventListener("drop", handleImportDrop);
 elements.courseWorkspace.addEventListener("input", handleAssignmentFilterChange);
-elements.courseWorkspace.addEventListener("change", (event) => {
+elements.courseWorkspace.addEventListener("change", async (event) => {
+  if (event.target?.dataset?.submissionFile !== undefined) {
+    await checkSubmissionFile(event.target);
+    return;
+  }
   if (!handleCoachLanguageChange(event)) handleAssignmentFilterChange(event);
 });
 elements.courseWorkspace.addEventListener("submit", handleCoachFormSubmit);

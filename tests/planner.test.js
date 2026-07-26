@@ -156,6 +156,26 @@ test("updates one assignment without changing another course", () => {
   assert.notEqual(updated, source);
 });
 
+test("persists a compact submission report through backup restore", () => {
+  const source = workspaceFixture();
+  const report = {
+    version: 1,
+    checkedAt: "2026-07-25T18:00:00.000Z",
+    file: { name: "Satoshi Paper.docx", wordCount: 1480, pageCount: 0, slideCount: 0 },
+    summary: { pass: 3, warn: 1, fail: 0 },
+    checks: [{ id: "bibliography", label: "Bibliography", status: "pass", detail: "Found." }],
+    rubric: [{ label: "Strategic insight", status: "warn", evidence: "Limited evidence." }],
+    scoreEstimate: { label: "ClassPilot estimate", min: 78, max: 88, confidence: "medium" },
+    aiRisk: { status: "review", score: 24, message: "Not proof of AI use." }
+  };
+
+  const updated = updateAssignment(source, "cs450", "paper", { submissionReport: report });
+  const restored = parseWorkspaceBackup(serializeWorkspaceBackup(updated));
+
+  assert.deepEqual(restored.courses[0].assignments[0].submissionReport, report);
+  assert.equal(JSON.stringify(restored).includes("Satoshi Nakamoto wrote"), false);
+});
+
 test("editing an assignment due date refreshes its normalized due timestamp", () => {
   const source = workspaceFixture();
   source.courses[0].assignments[0].dueAt = "2026-07-25T06:59:00.000Z";
