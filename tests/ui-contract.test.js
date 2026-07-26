@@ -4574,6 +4574,28 @@ test("Coach renders one adaptive step instead of a generic step list", () => {
   assert.doesNotMatch(markup, /coach-next-steps|<ol>/);
 });
 
+test("only the latest Coach step exposes feedback controls", () => {
+  const app = runApp({
+    workspaceRaw: JSON.stringify(createWorkspace([editableCourse()]))
+  });
+  const historic = app.context.renderCoachMessage({
+    role: "assistant",
+    text: "Earlier guidance.",
+    phase: "research",
+    currentStep: {
+      id: "old-step",
+      title: "Earlier step",
+      instruction: "Complete the earlier step.",
+      doneWhen: "The earlier step is complete.",
+      estimatedMinutes: 10
+    },
+    checkpointQuestion: "What did you find?"
+  }, "course-1", "assignment-1", false);
+
+  assert.match(historic, /Earlier step/);
+  assert.doesNotMatch(historic, /data-coach-step-feedback|data-add-coach-task/);
+});
+
 test("Coach step feedback creates one contextual student response", () => {
   const step = {
     id: "find-source",

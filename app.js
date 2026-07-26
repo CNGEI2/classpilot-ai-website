@@ -1352,8 +1352,17 @@ function renderCoach(course) {
   const connectionClass = coachMockMode
     ? "is-mock"
     : coachEndpoint ? "is-live" : "is-offline";
+  const latestAssistantIndex = messages.reduce(
+    (latest, message, index) => message.role === "assistant" ? index : latest,
+    -1
+  );
   const transcript = messages.length
-    ? messages.map((message) => renderCoachMessage(message, course.id, assignmentId)).join("")
+    ? messages.map((message, index) => renderCoachMessage(
+        message,
+        course.id,
+        assignmentId,
+        index === latestAssistantIndex && !viewState.pending
+      )).join("")
     : '<div class="coach-empty">' +
         '<p class="coach-empty-label">Start with the work in front of you</p>' +
         "<p>" + escapeHtml(localGuidance.summary || localGuidance.title || "") + "</p>" +
@@ -1440,7 +1449,7 @@ function coachLanguageOption(value, label, selected) {
     (value === selected ? " selected" : "") + ">" + label + "</option>";
 }
 
-function renderCoachCurrentStep(message, courseId, assignmentId) {
+function renderCoachCurrentStep(message, courseId, assignmentId, interactive = true) {
   const step = message.currentStep;
   if (!step || typeof step !== "object") return "";
   const phase = COACH_PHASE_LABELS[message.phase] || COACH_PHASE_LABELS.diagnose;
@@ -1457,31 +1466,33 @@ function renderCoachCurrentStep(message, courseId, assignmentId) {
         '<div><strong>Your checkpoint</strong><p>' +
           escapeHtml(message.checkpointQuestion) + "</p></div></div>"
     : "";
-  const addTask = assignmentId
+  const addTask = assignmentId && interactive
     ? '<button type="button" class="coach-add-task" data-add-coach-task' +
         ' data-course-id="' + escapeHtml(courseId) + '" data-assignment-id="' +
         escapeHtml(assignmentId) + '" data-task-title="' + escapeHtml(step.title) +
         '" aria-label="Add this Coach step to assignment tasks">' +
         '<i data-lucide="plus" aria-hidden="true"></i><span>Add task</span></button>'
     : "";
+  const actions = interactive
+    ? '<div class="coach-step-actions" role="group" aria-label="Respond to this Coach step">' +
+        '<button type="button" data-coach-step-feedback="done">' +
+          '<i data-lucide="circle-check" aria-hidden="true"></i><span>Done, continue</span></button>' +
+        '<button type="button" data-coach-step-feedback="stuck">' +
+          '<i data-lucide="life-buoy" aria-hidden="true"></i><span>I&#039;m stuck</span></button>' +
+        '<button type="button" data-coach-step-feedback="check">' +
+          '<i data-lucide="scan-search" aria-hidden="true"></i><span>Check my idea</span></button>' +
+      "</div>"
+    : "";
   return '<section class="coach-current-step" aria-label="Current learning step">' +
     '<header class="coach-step-header"><span class="coach-phase">' + escapeHtml(phase) +
       "</span>" + estimate + "</header>" +
     '<div class="coach-step-title-row"><h3>' + escapeHtml(step.title) + "</h3>" + addTask + "</div>" +
     '<p class="coach-step-instruction">' + escapeHtml(step.instruction) + "</p>" +
-    doneWhen + checkpoint +
-    '<div class="coach-step-actions" role="group" aria-label="Respond to this Coach step">' +
-      '<button type="button" data-coach-step-feedback="done">' +
-        '<i data-lucide="circle-check" aria-hidden="true"></i><span>Done, continue</span></button>' +
-      '<button type="button" data-coach-step-feedback="stuck">' +
-        '<i data-lucide="life-buoy" aria-hidden="true"></i><span>I&#039;m stuck</span></button>' +
-      '<button type="button" data-coach-step-feedback="check">' +
-        '<i data-lucide="scan-search" aria-hidden="true"></i><span>Check my idea</span></button>' +
-    "</div>" +
+    doneWhen + checkpoint + actions +
   "</section>";
 }
 
-function renderCoachMessage(message, courseId = "", assignmentId = "") {
+function renderCoachMessage(message, courseId = "", assignmentId = "", interactive = true) {
   const assistant = message.role === "assistant";
   const evidence = assistant && Array.isArray(message.evidence) && message.evidence.length
     ? '<div class="coach-evidence"><strong>Based on your course material</strong><ul>' +
@@ -1501,7 +1512,7 @@ function renderCoachMessage(message, courseId = "", assignmentId = "") {
         )).join("") + "</ul></div>"
     : "";
   const currentStep = assistant
-    ? renderCoachCurrentStep(message, courseId, assignmentId)
+    ? renderCoachCurrentStep(message, courseId, assignmentId, interactive)
     : "";
   const checkpoint = assistant && !message.currentStep && message.checkpointQuestion
     ? '<div class="coach-checkpoint is-standalone"><i data-lucide="message-circle-question" aria-hidden="true"></i>' +
