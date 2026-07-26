@@ -55,6 +55,31 @@ function validBody(overrides = {}) {
       action: "explain"
     },
     messages: [{ role: "user", text: "What do I need to do?" }],
+    coachState: {
+      phase: "understand",
+      currentStepId: "identify-requirement",
+      waitingForStudent: true,
+      secret: "remove"
+    },
+    ...overrides
+  };
+}
+
+function coachResponse(overrides = {}) {
+  return {
+    answer: "Choose the requirement that is least clear.",
+    phase: "understand",
+    currentStep: {
+      id: "identify-requirement",
+      title: "Identify one unclear requirement",
+      instruction: "Choose the requirement you understand least.",
+      doneWhen: "You can name it and explain what is unclear.",
+      estimatedMinutes: 5
+    },
+    checkpointQuestion: "Which requirement is least clear?",
+    waitingForStudent: true,
+    evidence: [],
+    missingInformation: [],
     ...overrides
   };
 }
@@ -132,7 +157,10 @@ test("mock mode returns labeled assignment-aware guidance and evidence", async (
   assert.equal(value.mode, "mock");
   assert.match(value.answer, /Future care play/);
   assert.ok(value.evidence.some((item) => /ethical dilemma/i.test(item.excerpt)));
-  assert.ok(value.nextSteps.some((item) => /Draft the play/i.test(item)));
+  assert.equal(value.phase, "understand");
+  assert.match(value.currentStep.instruction, /Draft the play/i);
+  assert.equal(value.waitingForStudent, true);
+  assert.equal("nextSteps" in value, false);
   assert.deepEqual(value.usage, { inputTokens: 0, outputTokens: 0 });
 });
 
@@ -166,7 +194,7 @@ test("Workers AI mode sends a bounded multi-turn chat and normalizes its respons
           return {
             choices: [{
               message: {
-                content: JSON.stringify({
+                content: JSON.stringify(coachResponse({
                   answer: "Start by outlining one scene for each requirement.",
                   evidence: [{
                     sourceId: "assignment:future-care:requirement:1",
@@ -174,9 +202,16 @@ test("Workers AI mode sends a bounded multi-turn chat and normalizes its respons
                     excerpt: "Include one ethical dilemma",
                     location: "Requirement 1"
                   }],
-                  nextSteps: ["Outline the ethical dilemma scene"],
-                  missingInformation: []
-                })
+                  phase: "outline",
+                  currentStep: {
+                    id: "outline-dilemma",
+                    title: "Outline the dilemma scene",
+                    instruction: "Write one sentence describing the scene's ethical conflict.",
+                    doneWhen: "The sentence names the conflict and who faces it.",
+                    estimatedMinutes: 10
+                  },
+                  checkpointQuestion: "Who faces the conflict in your scene?"
+                }))
               }
             }],
             usage: { prompt_tokens: 245, completion_tokens: 76 }
@@ -194,6 +229,13 @@ test("Workers AI mode sends a bounded multi-turn chat and normalizes its respons
   assert.equal(invocation.options.response_format.type, "json_object");
   assert.equal(invocation.options.messages.at(-1).role, "user");
   assert.match(invocation.options.messages.at(-1).content, /What do I need to do/);
+  assert.match(invocation.options.messages[1].content, /"phase":"understand"/);
+  assert.doesNotMatch(invocation.options.messages[1].content, /secret/);
+  assert.match(invocation.options.messages[0].content, /exactly one/i);
+  assert.match(invocation.options.messages[0].content, /wait for the student/i);
+  assert.match(invocation.options.messages[0].content, /stuck/i);
+  assert.match(invocation.options.messages[0].content, /complete assessed submission/i);
+  assert.match(invocation.options.messages[0].content, /untrusted reference data/i);
   assert.doesNotMatch(JSON.stringify(invocation.options), /Private other course|secretInternalNote/);
 });
 
@@ -221,12 +263,17 @@ test("Workers AI mode falls back to trusted assignment evidence when the model o
         assert.equal(model, "@cf/meta/llama-3.1-8b-instruct-fast");
         assert.equal(options.chat_template_kwargs, undefined);
         return {
-          choices: [{ message: { content: JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(coachResponse({
             answer: "Start by mapping the dilemma requirement to a scene.",
             evidence: [],
-            nextSteps: ["Outline the dilemma scene"],
-            missingInformation: []
-          }) } }],
+            currentStep: {
+              id: "outline-dilemma",
+              title: "Outline the dilemma scene",
+              instruction: "Write one sentence describing the ethical conflict.",
+              doneWhen: "The conflict and stakeholder are named.",
+              estimatedMinutes: 10
+            }
+          })) } }],
           usage: { prompt_tokens: 90, completion_tokens: 30 }
         };
       }
@@ -265,10 +312,12 @@ test("Workers AI mode safely accepts a plain conversational answer when JSON for
   assert.equal(value.mode, "live");
   assert.match(value.answer, /ethical dilemma/i);
   assert.equal(value.evidence[0].sourceId, "assignment:future-care:requirement:1");
-  assert.deepEqual(value.nextSteps, []);
+  assert.equal(value.phase, "diagnose");
+  assert.equal(value.currentStep, null);
+  assert.equal(value.waitingForStudent, true);
 });
 
-test("Workers AI mode flattens structured plan items into readable Coach steps", async () => {
+test("Workers AI mode keeps exactly one sanitized current step", async () => {
   const { handleCoachRequest } = await workerModule();
   const response = await handleCoachRequest(request(), {
     ...baseEnv,
@@ -276,15 +325,21 @@ test("Workers AI mode flattens structured plan items into readable Coach steps",
     AI: {
       async run() {
         return {
-          choices: [{ message: { content: JSON.stringify({
-            answer: "Use this three-day plan.",
+          choices: [{ message: { content: JSON.stringify(coachResponse({
+            answer: "Start with one interview preparation action.",
+            phase: "research",
             evidence: [],
-            nextSteps: [
-              { day: "Day 1", tasks: ["Schedule interviews", "Prepare questions"] },
-              { day: "Day 2", action: "Collect and label notes" }
-            ],
+            currentStep: {
+              id: "prepare-questions",
+              title: "Prepare interview questions",
+              instruction: "Write three questions for one stakeholder interview.",
+              doneWhen: "You have three open-ended questions.",
+              estimatedMinutes: 15,
+              extraSteps: ["Schedule interviews", "Collect notes"]
+            },
+            checkpointQuestion: "Which stakeholder will you interview?",
             missingInformation: [{ label: "Interview availability", text: "Confirm participant times" }]
-          }) } }],
+          })) } }],
           usage: { prompt_tokens: 80, completion_tokens: 32 }
         };
       }
@@ -293,10 +348,15 @@ test("Workers AI mode flattens structured plan items into readable Coach steps",
   const value = await response.json();
 
   assert.equal(response.status, 200);
-  assert.deepEqual(value.nextSteps, [
-    "Day 1: Schedule interviews; Prepare questions",
-    "Day 2: Collect and label notes"
-  ]);
+  assert.deepEqual(value.currentStep, {
+    id: "prepare-questions",
+    title: "Prepare interview questions",
+    instruction: "Write three questions for one stakeholder interview.",
+    doneWhen: "You have three open-ended questions.",
+    estimatedMinutes: 15
+  });
+  assert.equal("extraSteps" in value.currentStep, false);
+  assert.equal("nextSteps" in value, false);
   assert.deepEqual(value.missingInformation, [
     "Interview availability: Confirm participant times"
   ]);
@@ -321,7 +381,7 @@ test("live mode sends a hardened structured request and normalizes usage", async
             type: "message",
             content: [{
               type: "output_text",
-              text: JSON.stringify({
+              text: JSON.stringify(coachResponse({
                 answer: "Map each requirement to one scene before drafting.",
                 evidence: [{
                   sourceId: "assignment:future-care:requirement:1",
@@ -329,9 +389,16 @@ test("live mode sends a hardened structured request and normalizes usage", async
                   excerpt: "Include one ethical dilemma",
                   location: "Requirement 1"
                 }],
-                nextSteps: ["Draft the conflict scene"],
-                missingInformation: []
-              })
+                phase: "outline",
+                currentStep: {
+                  id: "draft-conflict",
+                  title: "Draft the conflict scene",
+                  instruction: "Write the opening exchange that reveals the ethical conflict.",
+                  doneWhen: "The exchange makes the conflict understandable.",
+                  estimatedMinutes: 15
+                },
+                checkpointQuestion: "What decision must the character make?"
+              }))
             }]
           }],
           usage: { input_tokens: 321, output_tokens: 87 }
@@ -351,6 +418,10 @@ test("live mode sends a hardened structured request and normalizes usage", async
   assert.equal(sent.model, "gpt-5-mini");
   assert.equal(sent.reasoning.effort, "low");
   assert.equal(sent.text.format.type, "json_schema");
+  assert.equal(sent.text.format.schema.properties.currentStep.type[0], "object");
+  assert.equal(sent.text.format.schema.properties.currentStep.type[1], "null");
+  assert.equal(sent.text.format.schema.properties.nextSteps, undefined);
+  assert.match(sent.instructions, /exactly one/i);
   assert.doesNotMatch(upstream.options.body, /secretInternalNote|Private other course/);
 });
 
@@ -369,8 +440,11 @@ test("worker strips invented citations and preserves valid source references", a
           type: "message",
           content: [{
             type: "output_text",
-            text: JSON.stringify({
+            text: JSON.stringify(coachResponse({
               answer: "The ethical dilemma is required.",
+              phase: "understand",
+              currentStep: null,
+              checkpointQuestion: "How will your scene show this dilemma?",
               evidence: [
                 {
                   sourceId: "invented",
@@ -384,10 +458,8 @@ test("worker strips invented citations and preserves valid source references", a
                   excerpt: "Include one ethical dilemma",
                   location: "Requirement 1"
                 }
-              ],
-              nextSteps: [],
-              missingInformation: []
-            })
+              ]
+            }))
           }]
         }],
         usage: { input_tokens: 100, output_tokens: 40 }
