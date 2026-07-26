@@ -7,3 +7,7 @@ ALLOWED_ORIGIN = "https://cngei2.github.io"
 COACH_MODE = "mock"
 OPENAI_MODEL = "gpt-5-mini"
 ENVIRONMENT = "production"
+
+[[kv_namespaces]]
+binding = "IMPORT_HANDOFFS"
+id = "replace_with_import_handoffs_namespace_id"

@@ -7,3 +7,4 @@ ENVIRONMENT=development
 CANVAS_ALLOWED_DOMAINS=sfbu.instructure.com
 CANVAS_CLIENT_ID=add_school_approved_client_id
 CANVAS_CLIENT_SECRET=add_with_wrangler_secret
+# IMPORT_HANDOFFS is a Wrangler KV binding, not a secret variable.

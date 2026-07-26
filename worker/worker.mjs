@@ -1,9 +1,14 @@
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const MAX_BODY_CHARACTERS = 64000;
+const MAX_IMPORT_BODY_CHARACTERS = 140000;
+const MAX_IMPORT_RAW_CHARACTERS = 100000;
 const MAX_HISTORY_MESSAGES = 8;
 const RATE_WINDOW_MS = 60000;
 const RATE_LIMIT = 20;
+const IMPORT_RATE_LIMIT = 30;
+const IMPORT_TTL_MS = 10 * 60 * 1000;
 const rateBuckets = new Map();
+const importRateBuckets = new Map();
 
 function cleanText(value, maxLength = 1200) {
   return String(value == null ? "" : value)
@@ -511,6 +516,254 @@ export async function handleCanvasRequest(request, env = {}, runtime = {}) {
   }
 }
 
+function importCorsHeaders(origin) {
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, X-ClassPilot-Extension-Version",
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin"
+  };
+}
+
+function importJsonResponse(value, status, origin = "") {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Referrer-Policy": "no-referrer",
+      "X-Content-Type-Options": "nosniff",
+      ...(origin ? importCorsHeaders(origin) : {})
+    }
+  });
+}
+
+function extensionOrigin(request) {
+  const origin = String(request.headers.get("Origin") || "").trim();
+  return /^chrome-extension:\/\/[a-p]{32}$/i.test(origin) ? origin : "";
+}
+
+function importStorage(env) {
+  if (!env.IMPORT_HANDOFFS || typeof env.IMPORT_HANDOFFS.get !== "function" ||
+      typeof env.IMPORT_HANDOFFS.put !== "function" ||
+      typeof env.IMPORT_HANDOFFS.delete !== "function") {
+    throw publicError(
+      "import_not_configured",
+      "Canvas Companion import storage is not configured yet.",
+      503
+    );
+  }
+  return env.IMPORT_HANDOFFS;
+}
+
+function cleanImportUrl(value) {
+  try {
+    const url = new URL(cleanText(value, 3000));
+    return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password
+      ? url.href.slice(0, 3000)
+      : "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function cleanImportStatus(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return Object.fromEntries([
+    ["state", cleanText(source.state, 120)],
+    ["nextUp", cleanText(source.nextUp, 300)],
+    ["submittedAt", cleanText(source.submittedAt, 200)],
+    ["score", cleanText(source.score, 120)]
+  ].filter(([, item]) => item));
+}
+
+export function sanitizeImportCapture(value) {
+  if (!value || typeof value !== "object") {
+    throw publicError("invalid_capture", "Send a valid Canvas page capture.", 400);
+  }
+  if (String(value.rawText || "").length > MAX_IMPORT_RAW_CHARACTERS ||
+      String(value.syllabus?.text || "").length > MAX_IMPORT_RAW_CHARACTERS ||
+      String(value.assignment?.instructionsText || "").length > 80000) {
+    throw publicError("payload_too_large", "The Canvas page capture is too large.", 413);
+  }
+  const courseSource = value.course && typeof value.course === "object" ? value.course : {};
+  const course = {
+    canvasId: cleanText(courseSource.canvasId, 160),
+    code: cleanText(courseSource.code, 160),
+    name: cleanText(courseSource.name, 500)
+  };
+  const canvasHost = canvasDomain(value.canvasHost);
+  if (!canvasHost || (!course.canvasId && !course.code && !course.name)) {
+    throw publicError("invalid_capture", "The Canvas course identity could not be read.", 400);
+  }
+  const capture = {
+    version: 1,
+    capturedAt: cleanText(value.capturedAt, 80),
+    sourceUrl: cleanImportUrl(value.sourceUrl),
+    sourceType: ["Canvas assignment page", "Canvas submitted assignment", "Course syllabus"]
+      .includes(value.sourceType) ? value.sourceType : "Canvas assignment page",
+    canvasHost,
+    course,
+    rawText: String(value.rawText || "")
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+      .slice(0, MAX_IMPORT_RAW_CHARACTERS)
+  };
+  if (value.assignment && typeof value.assignment === "object") {
+    const source = value.assignment;
+    const title = cleanText(source.title, 500);
+    if (!title) throw publicError("invalid_capture", "The Canvas assignment title could not be read.", 400);
+    capture.assignment = {
+      canvasId: cleanText(source.canvasId, 160),
+      title,
+      dueDate: cleanText(source.dueDate, 240),
+      points: cleanText(source.points, 160),
+      status: cleanImportStatus(source.status),
+      instructionsText: String(source.instructionsText || "")
+        .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+        .slice(0, 80000),
+      links: (Array.isArray(source.links) ? source.links : [])
+        .map((item) => ({
+          text: cleanText(item?.text, 300),
+          href: cleanImportUrl(item?.href)
+        }))
+        .filter((item) => item.href)
+        .slice(0, 40),
+      submissionTypes: cleanList(source.submissionTypes, 12, 80),
+      allowedExtensions: cleanList(source.allowedExtensions, 20, 20)
+        .map((item) => item.replace(/^\./, "").toLowerCase()),
+      rubric: (Array.isArray(source.rubric) ? source.rubric : [])
+        .map((item) => ({
+          label: cleanText(item?.label, 300),
+          description: cleanText(item?.description, 1200),
+          points: cleanText(item?.points, 120)
+        }))
+        .filter((item) => item.label)
+        .slice(0, 30)
+    };
+  }
+  if (value.syllabus && typeof value.syllabus === "object") {
+    const text = String(value.syllabus.text || "")
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+      .slice(0, MAX_IMPORT_RAW_CHARACTERS);
+    if (text.trim()) capture.syllabus = { text };
+  }
+  if (!capture.assignment && !capture.syllabus) {
+    throw publicError("invalid_capture", "Open a Canvas assignment, rubric, or syllabus page and try again.", 400);
+  }
+  return capture;
+}
+
+async function enforceImportRateLimit(request, runtime) {
+  const key = cleanText(request.headers.get("CF-Connecting-IP") || "anonymous", 160);
+  const now = typeof runtime.now === "function" ? runtime.now() : Date.now();
+  const current = importRateBuckets.get(key);
+  if (!current || now - current.startedAt >= RATE_WINDOW_MS) {
+    importRateBuckets.set(key, { startedAt: now, count: 1 });
+    return;
+  }
+  current.count += 1;
+  if (current.count > IMPORT_RATE_LIMIT) {
+    throw publicError("rate_limited", "Too many import requests. Try again in a minute.", 429);
+  }
+}
+
+function importCode(value) {
+  const code = String(value || "").trim();
+  return /^[a-zA-Z0-9._:-]{8,180}$/.test(code) ? code : "";
+}
+
+async function importRequestBody(request) {
+  const declaredLength = Number(request.headers.get("Content-Length")) || 0;
+  if (declaredLength > MAX_IMPORT_BODY_CHARACTERS) {
+    throw publicError("payload_too_large", "The Canvas page capture is too large.", 413);
+  }
+  const raw = await request.text();
+  if (raw.length > MAX_IMPORT_BODY_CHARACTERS) {
+    throw publicError("payload_too_large", "The Canvas page capture is too large.", 413);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (_error) {
+    throw publicError("invalid_json", "Send valid JSON for this import.", 400);
+  }
+}
+
+async function createImportHandoff(request, env, runtime, origin) {
+  const storage = importStorage(env);
+  const value = await importRequestBody(request);
+  const capture = sanitizeImportCapture(value.capture);
+  const code = importCode(
+    typeof runtime.randomUUID === "function" ? runtime.randomUUID() : crypto.randomUUID()
+  );
+  if (!code) throw publicError("internal_error", "ClassPilot could not prepare this import.", 500);
+  const now = typeof runtime.now === "function" ? runtime.now() : Date.now();
+  await storage.put(`import-handoff:${code}`, JSON.stringify({ capture, createdAt: now }), {
+    expirationTtl: 600
+  });
+  return importJsonResponse({
+    code,
+    expiresAt: new Date(now + IMPORT_TTL_MS).toISOString()
+  }, 201, origin);
+}
+
+async function redeemImportHandoff(request, env, runtime, origin) {
+  const storage = importStorage(env);
+  const value = await importRequestBody(request);
+  const code = importCode(value.code);
+  if (!code) throw publicError("invalid_handoff", "This ClassPilot import link is invalid.", 400);
+  const key = `import-handoff:${code}`;
+  const raw = await storage.get(key);
+  if (!raw) throw publicError("handoff_not_found", "This ClassPilot import link was already used or expired.", 404);
+  let saved;
+  try {
+    saved = JSON.parse(raw);
+  } catch (_error) {
+    await storage.delete(key);
+    throw publicError("handoff_expired", "This ClassPilot import link expired. Capture the Canvas page again.", 410);
+  }
+  const now = typeof runtime.now === "function" ? runtime.now() : Date.now();
+  if (!Number.isFinite(Number(saved.createdAt)) || now - Number(saved.createdAt) > IMPORT_TTL_MS) {
+    await storage.delete(key);
+    throw publicError("handoff_expired", "This ClassPilot import link expired. Capture the Canvas page again.", 410);
+  }
+  await storage.delete(key);
+  return importJsonResponse({ capture: sanitizeImportCapture(saved.capture) }, 200, origin);
+}
+
+export async function handleImportHandoffRequest(request, env = {}, runtime = {}) {
+  const url = new URL(request.url);
+  const isCreate = url.pathname === "/api/import-handoffs";
+  const isRedeem = url.pathname === "/api/import-handoffs/redeem";
+  if (!isCreate && !isRedeem) {
+    return importJsonResponse({ code: "not_found", message: "Not found." }, 404);
+  }
+  const origin = isCreate ? extensionOrigin(request) : allowedOrigin(request, env);
+  if (!origin) {
+    return importJsonResponse({
+      code: "origin_forbidden",
+      message: "This client is not allowed to use ClassPilot imports."
+    }, 403);
+  }
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: importCorsHeaders(origin) });
+  }
+  if (request.method !== "POST") {
+    return importJsonResponse({ code: "method_not_allowed", message: "Use POST for imports." }, 405, origin);
+  }
+  try {
+    await enforceImportRateLimit(request, runtime);
+    return isCreate
+      ? await createImportHandoff(request, env, runtime, origin)
+      : await redeemImportHandoff(request, env, runtime, origin);
+  } catch (error) {
+    return importJsonResponse({
+      code: error?.publicCode || "internal_error",
+      message: error?.publicCode ? error.message : "ClassPilot could not complete this import."
+    }, error?.publicStatus || 500, origin);
+  }
+}
+
 async function enforceRateLimit(request, env, runtime) {
   const key = cleanText(request.headers.get("CF-Connecting-IP") || "anonymous", 160);
   if (env.COACH_RATE_LIMITER && typeof env.COACH_RATE_LIMITER.limit === "function") {
@@ -851,8 +1104,10 @@ export async function handleCoachRequest(request, env = {}, runtime = {}) {
 export default {
   fetch(request, env) {
     const pathname = new URL(request.url).pathname;
-    return pathname.startsWith("/api/canvas/")
-      ? handleCanvasRequest(request, env)
-      : handleCoachRequest(request, env);
+    if (pathname.startsWith("/api/canvas/")) return handleCanvasRequest(request, env);
+    if (pathname.startsWith("/api/import-handoffs")) {
+      return handleImportHandoffRequest(request, env);
+    }
+    return handleCoachRequest(request, env);
   }
 };
