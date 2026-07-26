@@ -1,11 +1,14 @@
 import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Presentation, PresentationFile } from "@oai/artifact-tool";
 
-const ROOT = "/Users/pf/Documents/homework/classpilot-ai-website";
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BUILD = `${ROOT}/product-presentation/.build`;
 const OUTPUT = `${ROOT}/product-presentation/ClassPilot-AI-Product-Introduction.pptx`;
 const DESKTOP = `${BUILD}/coach-desktop.png`;
-const MOBILE = `${BUILD}/coach-mobile.png`;
+const CONVERSATION = `${BUILD}/coach-conversation.png`;
+const CONVERSATION_MOBILE = `${BUILD}/coach-conversation-mobile.png`;
 
 const C = {
   ink: "#141C22",
@@ -122,7 +125,8 @@ function numberedStep(slide, number, heading, body, left, top, width) {
 async function main() {
   await fs.mkdir(BUILD, { recursive: true });
   const desktopBytes = await fs.readFile(DESKTOP);
-  const mobileBytes = await fs.readFile(MOBILE);
+  const conversationBytes = await fs.readFile(CONVERSATION);
+  const conversationMobileBytes = await fs.readFile(CONVERSATION_MOBILE);
   const presentation = Presentation.create({ slideSize: { width: W, height: H } });
 
   // 1. Cover
@@ -136,14 +140,14 @@ async function main() {
       color: C.paper,
       bold: true,
     });
-    textBox(slide, "cover-body", "A private student workspace that reads uploads, organizes coursework, and coaches the student through the work.", 62, 390, 500, 108, {
+    textBox(slide, "cover-body", "A private student workspace that reads course material, builds a plan, checks the final file, and coaches the student in a live conversation.", 62, 390, 500, 108, {
       fontSize: 21,
       color: "#CAD1D4",
     });
     label(slide, "Product introduction", 62, 548, 190, C.goldSoft, "#725E16");
     shape(slide, "cover-screen-frame", 626, 82, 590, 544, C.paper, "#49545B", "roundRect");
     addImage(slide, desktopBytes, "ClassPilot AI Coach product screenshot", 642, 98, 558, 512, { left: 0, top: 0, right: 0, bottom: 0.36 });
-    notes(slide, "Introduce ClassPilot AI as a finished student workspace, then frame the AI Coach as one part of a broader course organization workflow.", ["ClassPilot AI local product screenshot, captured July 25, 2026."]);
+    notes(slide, "Introduce ClassPilot AI as a finished student workspace. The live conversational Coach is one part of a broader loop from course import to final submission check.", ["ClassPilot AI live product screenshot, captured July 25, 2026."]);
   }
 
   // 2. Problem
@@ -168,12 +172,12 @@ async function main() {
   // 3. Workflow
   {
     const slide = baseSlide(presentation, "Product workflow", 3);
-    title(slide, "One upload becomes an organized course workflow.", "The selected course is the source of truth, so files cannot drift into duplicate course records.");
+    title(slide, "Upload once. Keep every fact with the right course.", "Importing inside a course removes identity guesswork and prevents syllabus and assignment uploads from splitting into duplicates.");
     const steps = [
       ["Import once", "Upload a screenshot, assignment text, PDF, DOCX, or syllabus directly inside the course."],
       ["Extract facts", "Capture course name, assignment title, due date, points, status, requirements, and deliverables."],
       ["Organize by course", "Keep syllabus-level exams and policies separate from assignment-level tasks and evidence."],
-      ["Coach the work", "Explain the prompt, identify missing requirements, and turn it into the next practical steps."],
+      ["Build the work", "Create tasks, a study schedule, a next action, and evidence-grounded Coach context."],
     ];
     steps.forEach((item, i) => {
       const left = 58 + i * 302;
@@ -183,99 +187,117 @@ async function main() {
         shape(slide, `arrow-${i}`, left + 258, 296, 13, 13, C.rule, C.rule, "triangle");
       }
     });
-    textBox(slide, "workflow-result", "RESULT  /  Every course becomes a living workspace instead of a folder of disconnected uploads.", 58, 594, 1150, 44, {
+    textBox(slide, "workflow-result", "RESULT  /  One course workspace holds its assignments, syllabus, schedule, submission checks, and Coach history.", 58, 594, 1150, 44, {
       fontSize: 17,
       color: C.teal,
       bold: true,
     });
-    notes(slide, "Walk through the four-step loop. Emphasize that uploading within a course removes the need for the student to re-identify the course.", ["ClassPilot AI implementation: course-bound import flow and content parser, July 2026."]);
+    notes(slide, "Walk through the course-bound import flow. The selected course is authoritative, while global import remains available when the course is genuinely unknown.", ["ClassPilot AI implementation: course-bound import flow, source evidence catalog, and content parser, July 2026."]);
   }
 
-  // 4. Product screen
+  // 4. Full learning loop
   {
     const slide = baseSlide(presentation, "The product", 4);
-    title(slide, "The Coach works inside the selected assignment.", "It can see the due date, point value, extracted requirements, deliverables, and current work plan.");
-    shape(slide, "screen-shadow", 46, 226, 1188, 438, "#DDE1DE", "none", "roundRect");
-    shape(slide, "screen-frame", 58, 214, 1164, 438, C.paper, C.rule, "roundRect");
-    addImage(slide, desktopBytes, "ClassPilot AI Coach interface in assignment context", 72, 228, 1136, 410, { left: 0, top: 0, right: 0, bottom: 0.5 });
-    label(slide, "Selected assignment context", 830, 178, 262, C.goldSoft, "#725E16");
-    notes(slide, "Point out the course and assignment context strip, then show the four quick actions and conversational composer.", ["ClassPilot AI local product screenshot, captured July 25, 2026."]);
+    title(slide, "ClassPilot closes the loop from prompt to submission.", "Each feature uses the same course record, so the student's plan stays connected to the original evidence.");
+    const stages = [
+      ["Import", "Screenshot, text, PDF, DOCX, PPTX"],
+      ["Understand", "Facts, requirements, rubric, dates"],
+      ["Plan", "Tasks and adaptive study sessions"],
+      ["Focus", "One next action on Today"],
+      ["Check", "Rubric fit, file quality, AI-writing reminder"],
+      ["Coach", "Live follow-up conversation with citations"],
+    ];
+    stages.forEach((item, i) => {
+      const left = 50 + i * 198;
+      shape(slide, `loop-node-${i}`, left, 276, 46, 46, i === 5 ? C.gold : C.teal, i === 5 ? C.gold : C.teal, "ellipse");
+      textBox(slide, `loop-number-${i}`, String(i + 1), left, 282, 46, 30, { fontSize: 18, color: C.paper, bold: true, alignment: "center", verticalAlignment: "middle" });
+      textBox(slide, `loop-title-${i}`, item[0], left, 350, 166, 36, { fontSize: 21, bold: true });
+      textBox(slide, `loop-body-${i}`, item[1], left, 400, 166, 100, { fontSize: 16, color: C.muted });
+      if (i < stages.length - 1) {
+        rule(slide, left + 52, 298, 132, C.rule, 2);
+        shape(slide, `loop-arrow-${i}`, left + 170, 292, 14, 14, C.rule, C.rule, "triangle");
+      }
+    });
+    shape(slide, "loop-result-band", 50, 574, 1180, 62, C.ink, C.ink, "roundRect");
+    textBox(slide, "loop-result", "The student always knows what the source said, what remains, and what to do next.", 74, 589, 1132, 34, { fontSize: 20, color: C.paper, bold: true, alignment: "center" });
+    notes(slide, "Present the product as one connected learning loop rather than a collection of utilities. The same selected course and assignment context flows through every step.", ["ClassPilot AI implementation: import, planning, Today focus, submission checker, and Coach modules, July 2026."]);
   }
 
-  // 5. Coach behavior
+  // 5. Conversational Coach
   {
-    const slide = baseSlide(presentation, "AI Coach", 5);
-    title(slide, "Grounded help, not generic chat.", "Every response is structured around evidence from the selected course and a short list of next steps.");
-    shape(slide, "coach-evidence-frame", 48, 236, 706, 408, C.paper, C.rule, "roundRect");
-    addImage(slide, desktopBytes, "Coach answer with evidence and next steps", 62, 250, 678, 380, { left: 0.16, top: 0.34, right: 0.02, bottom: 0.08 });
+    const slide = baseSlide(presentation, "Live AI Coach", 5);
+    title(slide, "The Coach is a real multi-turn conversation.", "Students can ask a question, challenge the answer, request a plan, and act on the next steps without leaving the assignment.");
+    shape(slide, "coach-screen-frame", 48, 232, 742, 416, C.paper, C.rule, "roundRect");
+    addImage(slide, conversationBytes, "Live ClassPilot Coach conversation with course evidence and a three-day plan", 62, 246, 714, 388, { left: 0.17, top: 0.1, right: 0, bottom: 0.05 });
     const items = [
-      ["Explain", "Rewrites dense assignment language into a clear interpretation without inventing facts."],
-      ["Check", "Compares the student's plan against extracted requirements, points, dates, and deliverables."],
-      ["Plan", "Recommends the next small actions and keeps the student responsible for the final assessed work."],
+      ["FOLLOW UP", "Conversation history stays scoped to the selected course and assignment."],
+      ["VERIFY", "Evidence chips point back to exact due dates, requirements, and rubric text."],
+      ["ACT", "Any suggested next step can be added directly to the assignment checklist."],
     ];
     items.forEach((item, i) => {
-      const top = 248 + i * 126;
-      label(slide, item[0], 790, top, 112, i === 1 ? C.goldSoft : C.tealSoft, i === 1 ? "#725E16" : C.teal);
-      textBox(slide, `coach-item-${i}`, item[1], 928, top - 2, 290, 94, { fontSize: 18, color: C.muted });
-      if (i < 2) rule(slide, 790, top + 106, 428);
+      const top = 252 + i * 124;
+      textBox(slide, `coach-label-${i}`, item[0], 830, top, 110, 28, { fontSize: 13, color: i === 1 ? "#725E16" : C.teal, bold: true });
+      textBox(slide, `coach-copy-${i}`, item[1], 830, top + 36, 380, 70, { fontSize: 19, color: C.muted });
+      if (i < 2) rule(slide, 830, top + 110, 380);
     });
-    notes(slide, "Explain that the assistant has a bounded context object rather than unrestricted access to all student data. The visible evidence rail lets the student verify what the response used.", ["ClassPilot AI Coach implementation and local product screenshot, July 25, 2026."]);
+    notes(slide, "Show the two-turn live conversation. The Coach first identifies the easiest-to-miss requirement, then converts that advice into a three-day plan with evidence citations and actionable steps.", ["ClassPilot AI live product screenshot and Workers AI response, captured July 25, 2026."]);
   }
 
-  // 6. Architecture
+  // 6. Planning and submission intelligence
   {
-    const slide = baseSlide(presentation, "Secure architecture", 6);
-    title(slide, "The API key never enters the browser.", "ClassPilot sends only bounded course context through a same-origin-aware server proxy.");
+    const slide = baseSlide(presentation, "Daily workflow", 6);
+    title(slide, "Planning and final checks stay connected.", "ClassPilot supports the quiet work between importing an assignment and actually submitting it.");
+    const rows = [
+      ["TODAY", "One-click focus", "Shows one next action, starts a focus session, and advances when a checklist item is completed."],
+      ["SCHEDULE", "Adaptive study plan", "Creates calendar sessions from due dates and unfinished work, then replans after progress changes."],
+      ["FINAL CHECK", "Submission readiness", "Reads the uploaded file once, checks rubric coverage and deliverables, estimates a score range, and warns when AI-writing signals exceed 20%."],
+      ["CANVAS", "Read-only sync", "Imports active courses, syllabus content, assignments, dates, points, and submission state through scoped OAuth."],
+    ];
+    rows.forEach((item, i) => {
+      const top = 238 + i * 92;
+      textBox(slide, `daily-tag-${i}`, item[0], 58, top + 7, 132, 26, { fontSize: 12, color: i === 2 ? "#725E16" : C.teal, bold: true });
+      textBox(slide, `daily-title-${i}`, item[1], 218, top, 260, 38, { fontSize: 23, bold: true });
+      textBox(slide, `daily-copy-${i}`, item[2], 502, top, 704, 58, { fontSize: 17, color: C.muted });
+      rule(slide, 58, top + 72, 1148);
+    });
+    shape(slide, "canvas-boundary", 58, 620, 1148, 38, C.goldSoft, C.goldSoft, "roundRect");
+    textBox(slide, "canvas-boundary-text", "Canvas connection code is complete; live school access still requires an administrator-approved Developer Key.", 76, 628, 1112, 24, { fontSize: 15, color: "#725E16", bold: true, alignment: "center" });
+    notes(slide, "Explain how ClassPilot supports execution, not only import. Be transparent that the Canvas OAuth flow is implemented but institutional approval is an external prerequisite.", ["ClassPilot AI Today, study scheduler, submission checker, and Canvas connector implementations, July 2026.", "Canvas LMS OAuth2 documentation: https://developerdocs.instructure.com/services/canvas/oauth2"]);
+  }
+
+  // 7. Secure live architecture
+  {
+    const slide = baseSlide(presentation, "Secure architecture", 7);
+    title(slide, "Live AI stays bounded to the selected work.", "The browser sends only the selected context; the Worker validates it and returns a structured, evidence-grounded response.");
     const nodes = [
-      ["01", "Browser", "Local course data\nand conversations"],
-      ["02", "Context builder", "Selected course +\nselected assignment"],
-      ["03", "Secure Worker", "CORS, validation,\nrate limiting"],
-      ["04", "AI response", "Structured answer,\nevidence, next steps"],
+      ["01", "Browser", "Local workspace and scoped conversation"],
+      ["02", "Context builder", "Selected course, assignment, and sources"],
+      ["03", "Cloudflare Worker", "CORS, size limits, rate limits, validation"],
+      ["04", "Workers AI", "Live answer, citations, next steps"],
     ];
     nodes.forEach((n, i) => {
       const left = 54 + i * 302;
-      shape(slide, `architecture-node-${i}`, left, 270, 244, 220, i === 2 ? C.ink : C.paper, i === 2 ? C.ink : C.rule, "roundRect");
+      shape(slide, `architecture-node-${i}`, left, 270, 244, 218, i === 2 ? C.ink : C.paper, i === 2 ? C.ink : C.rule, "roundRect");
       textBox(slide, `architecture-index-${i}`, n[0], left + 22, 292, 48, 28, { fontSize: 13, color: i === 2 ? C.gold : C.teal, bold: true });
-      textBox(slide, `architecture-title-${i}`, n[1], left + 22, 340, 200, 42, { fontSize: 23, color: i === 2 ? C.paper : C.ink, bold: true });
-      textBox(slide, `architecture-body-${i}`, n[2], left + 22, 402, 200, 62, { fontSize: 17, color: i === 2 ? "#CBD2D5" : C.muted });
+      textBox(slide, `architecture-title-${i}`, n[1], left + 22, 340, 200, 52, { fontSize: 22, color: i === 2 ? C.paper : C.ink, bold: true });
+      textBox(slide, `architecture-body-${i}`, n[2], left + 22, 408, 200, 62, { fontSize: 16, color: i === 2 ? "#CBD2D5" : C.muted });
       if (i < 3) {
         rule(slide, left + 244, 378, 58, C.gold, 3);
         shape(slide, `architecture-arrow-${i}`, left + 284, 370, 18, 18, C.gold, C.gold, "triangle");
       }
     });
-    textBox(slide, "architecture-caption", "Production mode uses the OpenAI Responses API with server-side secrets. Explicit Mock mode remains available for deterministic UI testing.", 54, 550, 1160, 62, { fontSize: 18, color: C.muted });
-    notes(slide, "Use this slide to explain the security boundary. The browser holds student-facing state; the Worker controls origins, payload size, validation, rate limiting, and the server secret.", ["ClassPilot AI Worker implementation, July 25, 2026.", "OpenAI Responses API documentation: https://platform.openai.com/docs/api-reference/responses"]);
-  }
-
-  // 7. Integrity and privacy
-  {
-    const slide = baseSlide(presentation, "Trust by design", 7);
-    title(slide, "Help students do the work. Do not do it for them.", "The Coach is designed as a study partner with explicit academic-integrity and privacy boundaries.");
-    textBox(slide, "integrity-do-title", "THE COACH CAN", 58, 260, 500, 28, { fontSize: 14, color: C.teal, bold: true });
-    textBox(slide, "integrity-dont-title", "THE COACH WILL NOT", 686, 260, 500, 28, { fontSize: 14, color: C.red, bold: true });
-    const can = ["Explain assignment language", "Identify requirements and gaps", "Suggest a sequence of next steps", "Ground answers in uploaded evidence"];
-    const cannot = ["Invent missing course facts", "Write a complete assessed submission", "Send unrelated courses by default", "Expose an API secret in client code"];
-    can.forEach((value, i) => {
-      shape(slide, `can-dot-${i}`, 62, 324 + i * 66, 18, 18, C.teal, C.teal, "ellipse");
-      textBox(slide, `can-${i}`, value, 96, 316 + i * 66, 470, 38, { fontSize: 21 });
-    });
-    cannot.forEach((value, i) => {
-      shape(slide, `cannot-mark-${i}`, 690, 324 + i * 66, 18, 18, C.red, C.red, "rect");
-      textBox(slide, `cannot-${i}`, value, 724, 316 + i * 66, 470, 38, { fontSize: 21 });
-    });
-    shape(slide, "privacy-band", 58, 608, 1136, 48, C.ink, C.ink, "roundRect");
-    textBox(slide, "privacy-band-text", "Selected course context is sent only when the student asks; conversations remain scoped to that course and assignment.", 80, 618, 1092, 28, { fontSize: 16, color: C.paper, bold: true, alignment: "center" });
-    notes(slide, "Position academic integrity as a product feature. The Coach supports interpretation, planning, and checking while leaving judgment and final authorship with the student.", ["ClassPilot AI Coach system prompt and privacy UI, July 25, 2026."]);
+    textBox(slide, "architecture-caption", "No secret is stored in client code. Invalid citations are removed, missing evidence is surfaced, and the Coach is instructed not to write an entire assessed submission.", 54, 548, 1160, 68, { fontSize: 18, color: C.muted });
+    notes(slide, "Use this slide to explain the privacy and academic-integrity boundary. Workers AI is the default live provider; an OpenAI server-side provider remains optional without changing the public response contract.", ["ClassPilot AI Worker and Coach system instructions, July 25, 2026.", "Cloudflare Workers AI bindings: https://developers.cloudflare.com/workers-ai/configuration/bindings/", "Cloudflare Workers AI JSON mode: https://developers.cloudflare.com/workers-ai/features/json-mode/"]);
   }
 
   // 8. Validation
   {
     const slide = baseSlide(presentation, "Validation", 8);
-    title(slide, "Built like a product, verified like one.", "Automated contracts cover parsing, OCR normalization, course binding, Coach context, UI behavior, and backend security.");
+    title(slide, "The complete workflow is tested, not staged.", "Automated contracts and live browser QA cover import, planning, submission checks, Canvas boundaries, and multi-turn Coach behavior.");
     const stats = [
-      ["292", "automated tests passing"],
+      ["326", "automated tests passing"],
       ["0", "browser console errors"],
-      ["2", "responsive viewports checked"],
+      ["390", "px mobile width verified"],
     ];
     stats.forEach((s, i) => {
       const left = 58 + i * 174;
@@ -284,12 +306,12 @@ async function main() {
       textBox(slide, `stat-value-${i}`, s[0], left + 14, top + 16, 130, 56, { fontSize: 43, color: i === 0 ? C.teal : C.ink, bold: true });
       textBox(slide, `stat-label-${i}`, s[1], left + 14, top + 76, 130, 36, { fontSize: 13, color: C.muted, bold: true });
     });
-    textBox(slide, "validation-list", "VERIFIED FLOWS\n\nCanvas screenshots → exact title, due date, points, status\nSyllabus uploads → course-level dates and policies\nAssignment imports → requirements, deliverables, work plan\nCoach → isolated context, quick actions, custom questions", 58, 430, 520, 196, { fontSize: 17, color: C.muted });
+    textBox(slide, "validation-list", "VERIFIED FLOWS\n\nScreenshots and documents -> exact course and assignment facts\nCourse-bound upload -> no duplicate course split\nToday and scheduler -> next action and replanning\nFinal check -> rubric coverage, score range, AI-writing reminder\nCoach -> two live turns, citations, readable three-day plan", 58, 422, 620, 214, { fontSize: 17, color: C.muted });
     shape(slide, "mobile-frame", 782, 228, 292, 454, C.ink, C.ink, "roundRect");
-    addImage(slide, mobileBytes, "ClassPilot AI mobile Coach interface", 796, 242, 264, 426, { left: 0, top: 0, right: 0, bottom: 0.49 });
+    addImage(slide, conversationMobileBytes, "ClassPilot AI mobile Coach conversation without horizontal overflow", 796, 242, 264, 426);
     label(slide, "Mobile QA", 1090, 270, 126, C.goldSoft, "#725E16");
-    textBox(slide, "mobile-callout", "No horizontal overflow at 390 × 844. Controls remain readable and touch-friendly.", 1090, 322, 134, 166, { fontSize: 17, color: C.muted });
-    notes(slide, "Share the verification evidence: all automated tests passed, the tested browser had no console errors, and both desktop and mobile layouts were inspected.", ["ClassPilot AI test suite and local browser QA, July 25, 2026.", "ClassPilot AI mobile product screenshot, captured July 25, 2026."]);
+    textBox(slide, "mobile-callout", "No page or transcript overflow at 390 x 844. The live Coach returned citations and a readable multi-day plan.", 1090, 322, 134, 190, { fontSize: 17, color: C.muted });
+    notes(slide, "Share the verification evidence: 326 automated tests passed, the public product had no browser console errors, and the 390-pixel mobile layout had no page or transcript overflow.", ["ClassPilot AI test suite and public browser QA, July 25, 2026.", "ClassPilot AI live mobile product screenshot, captured July 25, 2026."]);
   }
 
   // 9. Close
@@ -297,13 +319,13 @@ async function main() {
     const slide = presentation.slides.add();
     slide.background.fill = C.ink;
     textBox(slide, "close-kicker", "CLASS PILOT AI", 58, 52, 350, 28, { fontSize: 14, color: C.gold, bold: true });
-    textBox(slide, "close-title", "One upload.\nOne organized course.\nOne clear next step.", 58, 154, 710, 260, { fontSize: 58, color: C.paper, bold: true });
-    textBox(slide, "close-body", "A private, evidence-grounded academic workspace designed around the student's actual course materials.", 62, 466, 680, 84, { fontSize: 22, color: "#CAD1D4" });
+    textBox(slide, "close-title", "One course.\nOne clear plan.\nOne Coach that remembers.", 58, 154, 710, 260, { fontSize: 58, color: C.paper, bold: true });
+    textBox(slide, "close-body", "A live, evidence-grounded academic workspace designed around the student's actual course materials and next action.", 62, 466, 680, 84, { fontSize: 22, color: "#CAD1D4" });
     shape(slide, "close-link", 840, 252, 370, 112, C.teal, C.teal, "roundRect");
     textBox(slide, "close-link-label", "LIVE PRODUCT", 872, 270, 306, 24, { fontSize: 13, color: C.goldSoft, bold: true, alignment: "center" });
     textBox(slide, "close-link-url", "cngei2.github.io/\nclasspilot-ai-website/", 872, 306, 306, 54, { fontSize: 19, color: C.paper, bold: true, alignment: "center" });
-    textBox(slide, "close-note", "Real-time AI responses activate when a server-side OpenAI API secret is configured. Mock mode remains available for deterministic testing.", 840, 416, 370, 118, { fontSize: 17, color: "#CAD1D4" });
-    notes(slide, "Close on the product promise and open the live URL. Be transparent that the real-time model connection is activated through the server secret, while the complete interface and backend are already implemented.", ["ClassPilot AI product: https://cngei2.github.io/classpilot-ai-website/"]);
+    textBox(slide, "close-note", "The public product now includes live multi-turn AI, evidence citations, planning, final checks, and responsive mobile support.", 840, 416, 370, 118, { fontSize: 17, color: "#CAD1D4" });
+    notes(slide, "Close on the product promise and open the live URL. The Coach is online through Workers AI; Canvas sync will become active after the school approves a Developer Key.", ["ClassPilot AI live product: https://cngei2.github.io/classpilot-ai-website/", "ClassPilot AI Worker deployment: https://classpilot-ai-coach.cngei2-classpilot.workers.dev"]);
   }
 
   for (const [index, slide] of presentation.slides.items.entries()) {
