@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const coach = require("../coach.js");
+const sourceEvidence = require("../source-evidence.js");
 const logic = require("../logic.js");
 const planner = require("../planner.js");
 
@@ -228,6 +229,10 @@ class FakeElement {
       this.dataset.openCoach !== undefined) return this;
     if (selector === "[data-coach-action]" &&
       this.dataset.coachAction !== undefined) return this;
+    if (selector === "[data-coach-source-id]" &&
+      this.dataset.coachSourceId !== undefined) return this;
+    if (selector === "[data-add-coach-task]" &&
+      this.dataset.addCoachTask !== undefined) return this;
     if (selector === "[data-coach-stop]" &&
       this.dataset.coachStop !== undefined) return this;
     if (selector === "[data-coach-clear]" &&
@@ -640,6 +645,7 @@ function runApp({
     DOMException,
     ClassPilotFileReaders: fileReaderApi,
     ClassPilotCoach: coach,
+    ClassPilotSourceEvidence: sourceEvidence,
     ClassPilotLogic: logicApi,
     ClassPilotPlanner: planner,
     console: {
@@ -4228,9 +4234,12 @@ test("course tabs provide semantic panels and roving keyboard navigation", async
 });
 
 test("the Coach runtime loads before app.js and exposes the complete conversation controls", () => {
+  const sourceScript = html.indexOf('src="source-evidence.js?v=17"');
   const coachScript = html.indexOf('src="coach.js?v=16"');
   const appScript = html.indexOf('src="app.js?v=16"');
+  assert.ok(sourceScript > 0);
   assert.ok(coachScript > 0);
+  assert.ok(coachScript > sourceScript);
   assert.ok(appScript > coachScript);
   assert.match(html, /name="classpilot-coach-endpoint"/);
   assert.match(appSource, /buildCoachContext/);
@@ -4242,7 +4251,43 @@ test("the Coach runtime loads before app.js and exposes the complete conversatio
   assert.match(appSource, /data-coach-stop/);
   assert.match(appSource, /data-coach-clear/);
   assert.match(appSource, /data-coach-language/);
+  assert.match(appSource, /data-coach-source-id/);
+  assert.match(appSource, /data-add-coach-task/);
+  assert.match(appSource, /function addCoachStepAsTask/);
   assert.match(appSource, /Selected course context is sent only when you ask/);
+});
+
+test("Coach next steps become duplicate-safe tasks on only the selected assignment", () => {
+  const course = editableCourse();
+  course.assignments.push({
+    id: "assignment-2",
+    title: "Other work",
+    dueDate: "2026-08-05 17:00",
+    details: { requirements: [], deliverables: [], steps: [] },
+    tasks: [{ id: "other-task", title: "Keep this task", done: false }]
+  });
+  const app = runApp({
+    workspaceRaw: JSON.stringify(createWorkspace([course]))
+  });
+
+  assert.equal(
+    app.context.addCoachStepAsTask("course-1", "assignment-1", "  Add two citations  "),
+    true
+  );
+  assert.equal(
+    app.context.addCoachStepAsTask("course-1", "assignment-1", "add   two citations"),
+    false
+  );
+
+  const saved = persistedWorkspace(app);
+  assert.deepEqual(
+    saved.courses[0].assignments[0].tasks.map((task) => task.title),
+    ["Write report", "Add two citations"]
+  );
+  assert.deepEqual(
+    saved.courses[0].assignments[1].tasks.map((task) => task.title),
+    ["Keep this task"]
+  );
 });
 
 test("opening Coach from an assignment preserves that exact assignment context", () => {

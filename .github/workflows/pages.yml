@@ -45,7 +45,7 @@ jobs:
         run: |
           rm -rf site-dist
           mkdir -p site-dist
-          cp index.html app.js logic.js planner.js file-readers.js coach.js styles.css .nojekyll site-dist/
+          cp index.html app.js logic.js planner.js file-readers.js source-evidence.js coach.js styles.css .nojekyll site-dist/
           cp -R vendor site-dist/vendor
       - name: Configure Pages
         uses: actions/configure-pages@v5

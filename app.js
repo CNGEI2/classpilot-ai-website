@@ -29,6 +29,10 @@ const {
 } = window.ClassPilotLogic;
 const { readImportFile } = window.ClassPilotFileReaders;
 const {
+  buildSourceCatalog,
+  findSourceRecord
+} = window.ClassPilotSourceEvidence;
+const {
   buildCoachContext,
   coachThreadKey,
   createThreadStore,
@@ -1040,7 +1044,7 @@ function renderCoach(course) {
     ? "is-mock"
     : coachEndpoint ? "is-live" : "is-offline";
   const transcript = messages.length
-    ? messages.map(renderCoachMessage).join("")
+    ? messages.map((message) => renderCoachMessage(message, course.id, assignmentId)).join("")
     : '<div class="coach-empty">' +
         '<p class="coach-empty-label">Start with the work in front of you</p>' +
         "<p>" + escapeHtml(localGuidance.summary || localGuidance.title || "") + "</p>" +
@@ -1129,18 +1133,35 @@ function coachLanguageOption(value, label, selected) {
     (value === selected ? " selected" : "") + ">" + label + "</option>";
 }
 
-function renderCoachMessage(message) {
+function renderCoachMessage(message, courseId = "", assignmentId = "") {
   const assistant = message.role === "assistant";
   const evidence = assistant && Array.isArray(message.evidence) && message.evidence.length
     ? '<div class="coach-evidence"><strong>Based on your course material</strong><ul>' +
         message.evidence.map((item) => (
-          "<li><span>" + escapeHtml(item.label) + "</span>" +
-            escapeHtml(item.text) + "</li>"
+          item.sourceId
+            ? '<li><button type="button" class="coach-citation" data-coach-source-id="' +
+                escapeHtml(item.sourceId) + '" data-course-id="' + escapeHtml(courseId) +
+                '" data-assignment-id="' + escapeHtml(assignmentId) + '">' +
+                '<span class="coach-citation-label">' + escapeHtml(item.label) + "</span>" +
+                (item.location
+                  ? '<span class="coach-citation-location">' + escapeHtml(item.location) + "</span>"
+                  : "") +
+                '<span class="coach-citation-excerpt">' +
+                  escapeHtml(item.excerpt || item.text) + "</span></button></li>"
+            : "<li><span>" + escapeHtml(item.label) + "</span>" +
+                escapeHtml(item.excerpt || item.text) + "</li>"
         )).join("") + "</ul></div>"
     : "";
   const nextSteps = assistant && Array.isArray(message.nextSteps) && message.nextSteps.length
     ? '<div class="coach-next-steps"><strong>Next steps</strong><ol>' +
-        message.nextSteps.map((item) => "<li>" + escapeHtml(item) + "</li>").join("") +
+        message.nextSteps.map((item) => "<li><span>" + escapeHtml(item) + "</span>" +
+          (assignmentId
+            ? '<button type="button" class="coach-add-task" data-add-coach-task' +
+                ' data-course-id="' + escapeHtml(courseId) + '" data-assignment-id="' +
+                escapeHtml(assignmentId) + '" data-task-title="' + escapeHtml(item) +
+                '" aria-label="Add this Coach step to assignment tasks">' +
+                '<i data-lucide="plus" aria-hidden="true"></i><span>Add task</span></button>'
+            : "") + "</li>").join("") +
       "</ol></div>"
     : "";
   const mode = assistant && message.mode === "mock"
@@ -1178,20 +1199,24 @@ function renderCoachIfActive(courseId, assignmentId) {
   refreshIcons();
 }
 
-function buildLocalMockCoachResponse(course, assignment, action) {
+function buildLocalMockCoachResponse(course, assignment, action, sourceCatalog = []) {
   const language = workspace.preferences.language || "en";
   const guidance = assignment
     ? buildAssignmentCoach(course, assignment, language)
     : buildCourseCoach(course, language);
   const detailRequirements = assignment?.details?.requirements || [];
-  const rubric = assignment?.details?.rubric || [];
-  const evidence = [
-    ...detailRequirements.slice(0, 3).map((text) => ({ label: "Requirement", text })),
-    ...rubric.slice(0, Math.max(0, 3 - detailRequirements.length)).map((item) => ({
-      label: item.weight ? "Rubric " + item.weight : "Rubric",
-      text: [item.label, item.description].filter(Boolean).join(": ")
-    }))
-  ];
+  const evidence = sourceCatalog
+    .filter((source) => assignment
+      ? source.id.startsWith("assignment:" + assignment.id + ":")
+      : source.id.startsWith("course:" + course.id + ":"))
+    .filter((source) => !assignment || ["requirement", "rubric", "deadline"].includes(source.kind))
+    .slice(0, 3)
+    .map((source) => ({
+      sourceId: source.id,
+      label: source.title,
+      excerpt: source.text,
+      location: source.location
+    }));
   const guidanceSteps = guidance.nextSteps || guidance.priorities || guidance.studyFocus || [];
   const actionLead = {
     explain: "The uploaded material has been organized into requirements and deliverables.",
@@ -1228,15 +1253,22 @@ async function submitCoachQuestion(course, assignment, question, action = "chat"
   renderCoachIfActive(course.id, assignmentId);
 
   try {
+    const sourceCatalog = buildSourceCatalog(course, assignment);
     const context = buildCoachContext(
       course,
       assignment,
       workspace.preferences.language || "en",
-      action
+      action,
+      sourceCatalog
     );
     const messages = coachThreadStore.get(course.id, assignmentId);
     const response = coachMockMode
-      ? await Promise.resolve(buildLocalMockCoachResponse(course, assignment, action))
+      ? await Promise.resolve(buildLocalMockCoachResponse(
+          course,
+          assignment,
+          action,
+          sourceCatalog
+        ))
       : await createCoachClient({ endpoint: coachEndpoint }).send({
           context,
           messages,
@@ -1356,6 +1388,71 @@ function clearCoachConversation() {
   renderCoursesView();
   refreshIcons();
   showStatus("This Coach conversation was cleared.", "success");
+  return true;
+}
+
+function normalizeCoachTaskTitle(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, 240);
+}
+
+function createCoachTaskId(assignment, title) {
+  const base = normalizeCoachTaskTitle(title)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48) || "next-step";
+  const used = new Set((assignment.tasks || []).map((task) => String(task.id || "")));
+  let candidate = "coach-" + base;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = "coach-" + base + "-" + suffix;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+function addCoachStepAsTask(courseId, assignmentId, value) {
+  const assignment = findAssignment(courseId, assignmentId);
+  const title = normalizeCoachTaskTitle(value);
+  if (!assignment || !title) return false;
+  const tasks = Array.isArray(assignment.tasks) ? assignment.tasks : [];
+  const duplicate = tasks.some(
+    (task) => normalizeCoachTaskTitle(task.title).toLowerCase() === title.toLowerCase()
+  );
+  if (duplicate) {
+    showStatus("That Coach step is already in this assignment.", "warn");
+    return false;
+  }
+  const nextWorkspace = updateAssignment(workspace, courseId, assignmentId, {
+    tasks: [
+      ...tasks,
+      { id: createCoachTaskId(assignment, title), title, done: false }
+    ]
+  });
+  if (!commitWorkspace(nextWorkspace)) return false;
+  showStatus("Added " + title + " to this assignment.", "success");
+  return true;
+}
+
+function focusCoachSource(courseId, assignmentId, sourceId) {
+  const course = workspace.courses.find((item) => item.id === courseId);
+  if (!course) return false;
+  const assignment = (course.assignments || []).find((item) => item.id === assignmentId) || null;
+  const source = findSourceRecord(buildSourceCatalog(course, assignment), sourceId);
+  if (!source) {
+    showStatus("This source is no longer available in the current course material.", "warn");
+    return false;
+  }
+  if (source.kind.startsWith("course-") || ["grading", "policy", "exam", "weekly-guide"].includes(source.kind)) {
+    state.activeCourseTab = "syllabus";
+    state.selectedAssignmentId = "";
+  } else {
+    state.activeCourseTab = "assignments";
+    state.selectedAssignmentId = assignment?.id || "";
+  }
+  renderCoursesView();
+  refreshIcons();
+  showStatus(source.location + ": " + source.text, "info");
   return true;
 }
 
@@ -2942,6 +3039,26 @@ function handleDocumentClick(event) {
     openAssignmentCoach(
       assignmentCoach.dataset.courseId,
       assignmentCoach.dataset.assignmentId
+    );
+    return;
+  }
+
+  const coachSource = event.target.closest("[data-coach-source-id]");
+  if (coachSource) {
+    focusCoachSource(
+      coachSource.dataset.courseId,
+      coachSource.dataset.assignmentId,
+      coachSource.dataset.coachSourceId
+    );
+    return;
+  }
+
+  const coachTask = event.target.closest("[data-add-coach-task]");
+  if (coachTask) {
+    addCoachStepAsTask(
+      coachTask.dataset.courseId,
+      coachTask.dataset.assignmentId,
+      coachTask.dataset.taskTitle
     );
     return;
   }

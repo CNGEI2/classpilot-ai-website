@@ -9,7 +9,15 @@ const workflow = fs.readFileSync(
 );
 const readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
 const workerReadmePath = path.join(__dirname, "..", "worker", "README.md");
-const frontendRuntime = ["index.html", "app.js", "logic.js", "planner.js", "file-readers.js", "coach.js"]
+const frontendRuntime = [
+  "index.html",
+  "app.js",
+  "logic.js",
+  "planner.js",
+  "file-readers.js",
+  "source-evidence.js",
+  "coach.js"
+]
   .map((file) => fs.readFileSync(path.join(__dirname, "..", file), "utf8"))
   .join("\n");
 
@@ -41,7 +49,7 @@ test("Pages workflow uses least privilege and packages the verified runtime", ()
   assert.match(deployJob, /rm -rf site-dist/);
   assert.match(
     deployJob,
-    /cp index\.html app\.js logic\.js planner\.js file-readers\.js coach\.js styles\.css \.nojekyll site-dist\//
+    /cp index\.html app\.js logic\.js planner\.js file-readers\.js source-evidence\.js coach\.js styles\.css \.nojekyll site-dist\//
   );
   assert.match(deployJob, /cp -R vendor site-dist\/vendor/);
 });
