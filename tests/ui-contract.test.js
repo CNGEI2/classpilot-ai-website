@@ -2895,7 +2895,9 @@ test("loads local runtime dependencies before app.js", () => {
     "vendor/tesseract/tesseract.min.js",
     "logic.js",
     "planner.js",
+    "vendor/jszip/jszip.min.js",
     "file-readers.js",
+    "submission-checker.js",
     "vendor/lucide/lucide.js",
     "app.js"
   ].map((name) => html.indexOf(name));

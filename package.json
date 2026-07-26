@@ -18,6 +18,7 @@
   ],
   "license": "UNLICENSED",
   "devDependencies": {
+    "jszip": "3.10.1",
     "lucide": "1.25.0",
     "pdfjs-dist": "6.1.200"
   }

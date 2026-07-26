@@ -108,6 +108,14 @@ test("classifies PDF, image, and text imports", () => {
   assert.equal(classifyImportFile({ name: "prompt.txt", type: "text/plain" }), "text");
   assert.equal(classifyImportFile({ name: "notes.md", type: "text/markdown" }), "text");
   assert.equal(classifyImportFile({ name: "notes.md", type: "text/x-markdown" }), "text");
+  assert.equal(classifyImportFile({
+    name: "report.docx",
+    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  }), "docx");
+  assert.equal(classifyImportFile({
+    name: "slides.pptx",
+    type: "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+  }), "pptx");
 });
 
 test("rejects unsupported MIME types and MIME-extension conflicts", () => {
@@ -122,8 +130,57 @@ test("uses extension fallback only for empty or generic MIME", () => {
   assert.equal(classifyImportFile({ name: "syllabus.PDF", type: "" }), "pdf");
   assert.equal(classifyImportFile({ name: "canvas.webp" }), "image");
   assert.equal(classifyImportFile({ name: "data.csv", type: "application/octet-stream" }), "text");
+  assert.equal(classifyImportFile({ name: "report.DOCX", type: "" }), "docx");
+  assert.equal(classifyImportFile({ name: "slides.pptx", type: "application/octet-stream" }), "pptx");
   assert.equal(classifyImportFile({ name: "archive.bin", type: "" }), "unsupported");
   assert.equal(classifyImportFile({ name: "archive.gif", type: "" }), "unsupported");
+});
+
+test("reads DOCX paragraphs from a local archive", async () => {
+  const file = {
+    name: "report.docx",
+    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    size: 100,
+    arrayBuffer: async () => new ArrayBuffer(4)
+  };
+  const result = await readImportFile(file, {
+    archiveLoader: async () => ({
+      files: {
+        "word/document.xml": {
+          async: async () => "<w:document><w:body><w:p><w:r><w:t>Main Report</w:t></w:r></w:p><w:p><w:r><w:t>Interview evidence</w:t></w:r></w:p></w:body></w:document>"
+        }
+      }
+    }),
+    parseXmlText: (xml) => [...xml.matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)].map((match) => match[1]).join(" ")
+  });
+
+  assert.equal(result.kind, "docx");
+  assert.equal(result.text, "Main Report Interview evidence");
+  assert.equal(result.pageCount, 0);
+  assert.equal(result.slideCount, 0);
+});
+
+test("reads PPTX slides in numeric order", async () => {
+  const file = {
+    name: "slides.pptx",
+    type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    size: 100,
+    arrayBuffer: async () => new ArrayBuffer(4)
+  };
+  const result = await readImportFile(file, {
+    archiveLoader: async () => ({
+      files: {
+        "ppt/slides/slide10.xml": { async: async () => "<a:t>Last slide</a:t>" },
+        "ppt/slides/slide2.xml": { async: async () => "<a:t>Second slide</a:t>" },
+        "ppt/slides/slide1.xml": { async: async () => "<a:t>First slide</a:t>" }
+      }
+    }),
+    parseXmlText: (xml) => [...xml.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g)].map((match) => match[1]).join(" ")
+  });
+
+  assert.equal(result.kind, "pptx");
+  assert.equal(result.text, "First slide\n\nSecond slide\n\nLast slide");
+  assert.equal(result.slideCount, 3);
 });
 
 test("rejects empty and oversized files but accepts the exact 25 MB limit", () => {

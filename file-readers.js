@@ -8,6 +8,8 @@
     const type = String(file.type || "").trim().toLowerCase();
     const mimeKinds = {
       "application/pdf": "pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
       "image/png": "image",
       "image/jpeg": "image",
       "image/webp": "image",
@@ -19,6 +21,8 @@
     if (mimeKinds[type]) return mimeKinds[type];
     if (type && type !== "application/octet-stream") return "unsupported";
     if (name.endsWith(".pdf")) return "pdf";
+    if (name.endsWith(".docx")) return "docx";
+    if (name.endsWith(".pptx")) return "pptx";
     if (/\.(png|jpe?g|webp)$/.test(name)) return "image";
     if (/\.(txt|md|csv)$/.test(name)) return "text";
     return "unsupported";
@@ -27,7 +31,7 @@
   function validateImportFile(file = {}) {
     const kind = classifyImportFile(file);
     if (kind === "unsupported") {
-      throw new Error("Use PDF, PNG, JPEG, WebP, TXT, Markdown, or CSV.");
+      throw new Error("Use PDF, DOCX, PPTX, PNG, JPEG, WebP, TXT, Markdown, or CSV.");
     }
     if (Number(file.size) > MAX_FILE_BYTES) {
       throw new Error("Files must be 25 MB or smaller.");
@@ -161,6 +165,80 @@
   function readFileAsArrayBuffer(file, signal) {
     return readWithFileReader(file, signal, "readAsArrayBuffer") ||
       abortableAwait(signal, () => file.arrayBuffer(), cancelOperation);
+  }
+
+  function defaultParseXmlText(xml, kind) {
+    if (typeof DOMParser !== "function") {
+      throw new Error("Office document text parsing is unavailable in this browser.");
+    }
+    const documentXml = new DOMParser().parseFromString(xml, "application/xml");
+    if (documentXml.getElementsByTagName("parsererror").length) {
+      throw new Error("The Office document contains invalid XML.");
+    }
+    const textFrom = (node) => Array.from(node.getElementsByTagNameNS("*", "t"))
+      .map((textNode) => String(textNode.textContent || "").trim())
+      .filter(Boolean)
+      .join(" ");
+    if (kind === "docx") {
+      const paragraphs = Array.from(documentXml.getElementsByTagNameNS("*", "p"))
+        .map(textFrom)
+        .filter(Boolean);
+      return paragraphs.join("\n");
+    }
+    return textFrom(documentXml);
+  }
+
+  async function loadOfficeArchive(bytes, options) {
+    if (options.archiveLoader) {
+      return abortableAwait(options.signal, () => options.archiveLoader(bytes));
+    }
+    const zipApi = options.JSZip || root.JSZip;
+    if (!zipApi || typeof zipApi.loadAsync !== "function") {
+      throw new Error("Office document reader is unavailable.");
+    }
+    return abortableAwait(options.signal, () => zipApi.loadAsync(bytes));
+  }
+
+  async function readArchiveEntry(entry, signal) {
+    if (!entry || typeof entry.async !== "function") {
+      throw new Error("The Office document is missing required content.");
+    }
+    return abortableAwait(signal, () => entry.async("string"), cancelOperation);
+  }
+
+  async function readOfficeFile(file, kind, options = {}) {
+    const buffer = await readFileAsArrayBuffer(file, options.signal);
+    const archive = await loadOfficeArchive(new Uint8Array(buffer), options);
+    const files = archive?.files || {};
+    const parseXmlText = options.parseXmlText || defaultParseXmlText;
+
+    if (kind === "docx") {
+      const xml = await readArchiveEntry(files["word/document.xml"], options.signal);
+      return {
+        kind,
+        text: String(parseXmlText(xml, kind) || "").trim(),
+        pageCount: 0,
+        slideCount: 0
+      };
+    }
+
+    const slides = Object.keys(files)
+      .map((name) => ({ name, match: name.match(/^ppt\/slides\/slide(\d+)\.xml$/) }))
+      .filter((item) => item.match)
+      .sort((left, right) => Number(left.match[1]) - Number(right.match[1]));
+    if (!slides.length) throw new Error("The presentation contains no readable slides.");
+    const texts = [];
+    for (const slide of slides) {
+      throwIfAborted(options.signal);
+      const xml = await readArchiveEntry(files[slide.name], options.signal);
+      texts.push(String(parseXmlText(xml, kind) || "").trim());
+    }
+    return {
+      kind,
+      text: texts.filter(Boolean).join("\n\n"),
+      pageCount: 0,
+      slideCount: slides.length
+    };
   }
 
   async function canvasToBlob(canvas) {
@@ -333,6 +411,9 @@
         () => cancelOperation(ocrOperation)
       );
       return { kind, text, pageCount: 1 };
+    }
+    if (kind === "docx" || kind === "pptx") {
+      return readOfficeFile(file, kind, options);
     }
     return readPdfFile(file, options);
   }
