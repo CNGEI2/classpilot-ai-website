@@ -4,12 +4,16 @@ compatibility_date = "2026-07-25"
 
 [vars]
 ALLOWED_ORIGIN = "https://cngei2.github.io"
-COACH_MODE = "mock"
+COACH_MODE = "workers_ai"
 OPENAI_MODEL = "gpt-5-mini"
+WORKERS_AI_MODEL = "@cf/zai-org/glm-4.7-flash"
 ENVIRONMENT = "production"
 CANVAS_ALLOWED_DOMAINS = "sfbu.instructure.com"
 CANVAS_CLIENT_ID = ""
 CANVAS_SCOPES = "url:GET|/api/v1/courses url:GET|/api/v1/courses/:course_id url:GET|/api/v1/courses/:course_id/assignments"
+
+[ai]
+binding = "AI"
 
 # Add a CANVAS_SESSIONS KV binding after creating the namespace:
 # [[kv_namespaces]]

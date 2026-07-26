@@ -151,6 +151,66 @@ test("live mode without a key returns a stable configuration error", async () =>
   });
 });
 
+test("Workers AI mode sends a bounded multi-turn chat and normalizes its response", async () => {
+  const { handleCoachRequest } = await workerModule();
+  let invocation;
+  const response = await handleCoachRequest(
+    request(),
+    {
+      ...baseEnv,
+      COACH_MODE: "workers_ai",
+      WORKERS_AI_MODEL: "@cf/zai-org/glm-4.7-flash",
+      AI: {
+        async run(model, options) {
+          invocation = { model, options };
+          return {
+            choices: [{
+              message: {
+                content: JSON.stringify({
+                  answer: "Start by outlining one scene for each requirement.",
+                  evidence: [{
+                    sourceId: "assignment:future-care:requirement:1",
+                    label: "Requirement",
+                    excerpt: "Include one ethical dilemma",
+                    location: "Requirement 1"
+                  }],
+                  nextSteps: ["Outline the ethical dilemma scene"],
+                  missingInformation: []
+                })
+              }
+            }],
+            usage: { prompt_tokens: 245, completion_tokens: 76 }
+          };
+        }
+      }
+    }
+  );
+  const value = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(value.mode, "live");
+  assert.deepEqual(value.usage, { inputTokens: 245, outputTokens: 76 });
+  assert.equal(invocation.model, "@cf/zai-org/glm-4.7-flash");
+  assert.equal(invocation.options.response_format.type, "json_object");
+  assert.equal(invocation.options.messages.at(-1).role, "user");
+  assert.match(invocation.options.messages.at(-1).content, /What do I need to do/);
+  assert.doesNotMatch(JSON.stringify(invocation.options), /Private other course|secretInternalNote/);
+});
+
+test("Workers AI mode reports a stable configuration error without its binding", async () => {
+  const { handleCoachRequest } = await workerModule();
+  const response = await handleCoachRequest(request(), {
+    ...baseEnv,
+    COACH_MODE: "workers_ai",
+    WORKERS_AI_MODEL: "@cf/zai-org/glm-4.7-flash"
+  });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    code: "not_configured",
+    message: "The conversational AI Coach is not configured yet."
+  });
+});
+
 test("live mode sends a hardened structured request and normalizes usage", async () => {
   const { handleCoachRequest } = await workerModule();
   let upstream;
