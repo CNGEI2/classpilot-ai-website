@@ -5,7 +5,7 @@
   "description": "A browser-based academic planner for course syllabi, Canvas assignments, screenshots, and student workplans.",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check logic.js && node --check planner.js && node --check file-readers.js && node --check source-evidence.js && node --check coach.js && node --check worker/worker.mjs && node --check app.js",
+    "check": "node --check logic.js && node --check planner.js && node --check file-readers.js && node --check source-evidence.js && node --check submission-checker.js && node --check coach.js && node --check worker/worker.mjs && node --check app.js",
     "verify": "npm test && npm run check",
     "start": "python3 -m http.server 4173 --bind 127.0.0.1"
   },
