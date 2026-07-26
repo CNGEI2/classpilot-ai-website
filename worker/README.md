@@ -1,6 +1,6 @@
 # ClassPilot Coach And Canvas Worker
 
-This Worker is the security boundary between the public GitHub Pages frontend and its model providers. It accepts only `POST /api/coach`, validates a bounded selected-course payload, applies origin and rate limits, and never returns secrets or raw upstream errors.
+This Worker is the security boundary between the public GitHub Pages frontend and its model providers. It accepts bounded Coach, Canvas OAuth, and one-time Canvas Companion import requests, applies origin and rate limits, and never returns secrets or raw upstream errors.
 
 Each request may include a bounded source catalog generated from only the selected course and assignment. Both mock and live responses use evidence objects with `sourceId`, `label`, `excerpt`, and `location`. The Worker drops evidence whose source ID is absent from the request and replaces mismatched excerpts with trusted source text. The live prompt requires source IDs for factual course claims and places unknown information in `missingInformation`.
 
@@ -81,6 +81,24 @@ npx wrangler secret put CANVAS_CLIENT_SECRET --config worker/wrangler.toml
 `CANVAS_ALLOWED_DOMAINS` is an exact comma-separated allowlist. OAuth state expires after ten minutes. Access and refresh tokens stay in Worker KV; the browser receives only an opaque ClassPilot session by an origin-checked `postMessage`. The frontend keeps that session in `sessionStorage`, not `localStorage`.
 
 Canvas' API policy permits manually generated tokens for testing only and requires multi-user applications to use OAuth. Do not add a token-paste field to the public product.
+
+## Enable Canvas Companion Handoffs
+
+Canvas Companion does not require a Canvas Developer Key. It requires a dedicated KV namespace for short-lived page captures:
+
+```bash
+npx wrangler kv namespace create IMPORT_HANDOFFS --config worker/wrangler.toml
+```
+
+Add the returned namespace ID to `worker/wrangler.toml`:
+
+```toml
+[[kv_namespaces]]
+binding = "IMPORT_HANDOFFS"
+id = "the_namespace_id"
+```
+
+`POST /api/import-handoffs` accepts only an explicit browser-extension capture. It removes unexpected fields and rejects over-limit content before storage. The opaque code expires after ten minutes. `POST /api/import-handoffs/redeem` accepts only the configured ClassPilot origin, deletes the record before returning it, and rejects a second redemption. Canvas passwords, cookies, session tokens, personal access tokens, and calendar-feed secrets are not accepted by the capture schema.
 
 ## Local Development
 

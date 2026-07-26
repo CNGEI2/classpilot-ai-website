@@ -2,6 +2,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const { execFileSync } = require("node:child_process");
+const JSZip = require("jszip");
 
 const workflow = fs.readFileSync(
   path.join(__dirname, "..", ".github", "workflows", "pages.yml"),
@@ -74,4 +76,38 @@ test("release documentation explains the secure Coach boundary", () => {
   assert.match(readme, /Today.*focus.*automatic.*study/s);
   assert.match(readme, /Final check.*Canvas/s);
   assert.doesNotMatch(frontendRuntime, /OPENAI_API_KEY/);
+});
+
+test("release includes a documented and downloadable Canvas Companion", async () => {
+  const root = path.join(__dirname, "..");
+  const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+  const extensionReadme = fs.readFileSync(path.join(root, "extension", "README.md"), "utf8");
+  const workerReadme = fs.readFileSync(workerReadmePath, "utf8");
+
+  assert.equal(packageJson.scripts["package:extension"], "node scripts/package-extension.mjs");
+  assert.match(extensionReadme, /Load unpacked/);
+  assert.match(extensionReadme, /activeTab/);
+  assert.match(extensionReadme, /does not read.*password/is);
+  assert.match(readme, /Canvas Companion/);
+  assert.match(readme, /ClassPilot-Canvas-Companion\.zip/);
+  assert.match(workerReadme, /IMPORT_HANDOFFS/);
+  assert.match(workerReadme, /ten minutes/i);
+  assert.match(workflow, /npm run package:extension/);
+  assert.match(workflow, /ClassPilot-Canvas-Companion\.zip/);
+
+  execFileSync(process.execPath, ["scripts/package-extension.mjs"], { cwd: root });
+  const archivePath = path.join(root, "dist", "ClassPilot-Canvas-Companion.zip");
+  const archive = await JSZip.loadAsync(fs.readFileSync(archivePath));
+  for (const required of [
+    "manifest.json",
+    "service-worker.js",
+    "capture.js",
+    "popup.html",
+    "popup.js",
+    "popup.css",
+    "README.md",
+    "icons/icon-128.png"
+  ]) {
+    assert.ok(archive.file(required), `extension package is missing ${required}`);
+  }
 });

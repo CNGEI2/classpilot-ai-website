@@ -24,6 +24,16 @@ Each assignment has a **Final check** file input. One upload checks file type, p
 
 ## Canvas Sync
 
+### Canvas Companion Without A Developer Key
+
+The production fallback for schools that do not approve a Canvas Developer Key is **ClassPilot Canvas Companion**, a Manifest V3 browser extension. Open one Canvas assignment, rubric, or syllabus page, review the detected fields, and send it to ClassPilot. The capture is merged by Canvas host, course ID, and assignment ID, so syllabus and assignment imports remain under the same course and repeated captures update instead of duplicating records.
+
+Download the current package: [`ClassPilot-Canvas-Companion.zip`](https://cngei2.github.io/classpilot-ai-website/downloads/ClassPilot-Canvas-Companion.zip)
+
+The extension uses temporary `activeTab` access after an explicit student click. It never reads Canvas passwords, SSO credentials, MFA codes, cookies, or personal access tokens. The Worker keeps the sanitized capture for at most ten minutes, returns an opaque one-time code, and deletes the capture when ClassPilot redeems it. See [`extension/README.md`](extension/README.md) for installation, permissions, privacy, and removal instructions.
+
+### Optional Institution OAuth
+
 ClassPilot includes a read-only Canvas OAuth flow. After authorization, **Sync now** imports the student's active courses, syllabi, assignments, due dates, points, submission state, and allowed file types. Stable Canvas IDs keep repeated syncs in the same course and preserve completed ClassPilot tasks.
 
 Canvas tokens never enter the static site or `localStorage`. The Worker stores OAuth tokens in Cloudflare KV and gives the browser an opaque session kept in `sessionStorage`. The proxy exposes only fixed Canvas `GET` routes for courses and assignments. The public connection becomes active after SFBU approves a scoped Canvas Developer Key and its Client ID, Client Secret, and KV binding are configured on the Worker.
@@ -44,7 +54,7 @@ ClassPilot stores its workspace and Coach conversation history in this browser. 
 
 Export a JSON backup before changing browsers or clearing data. Restore deeply validates course, assignment, and task records before replacing the current workspace. Transient storage failures remain retryable, and restore or clear can recover from corrupt version 7 data. The current workspace uses schema version 7 and migrates the prior version 6 local course storage on first load while retaining the version 6 value as a recovery copy.
 
-This release does not provide notifications after the page closes or live cross-device synchronization. The public Coach uses Cloudflare Workers AI; the optional OpenAI provider still requires a server-side key. Live Canvas sync requires a school-approved Canvas Developer Key, so the product returns a clear configuration status until that approval is installed.
+This release does not provide notifications after the page closes or live cross-device synchronization. The public Coach uses Cloudflare Workers AI; the optional OpenAI provider still requires a server-side key. Full background Canvas API sync still requires a school-approved Canvas Developer Key, while Canvas Companion provides explicit one-page imports without that key.
 
 The complete personal workflow is intentionally connected: **Final check** evaluates the student's proposed submission before the deadline, while **Canvas** sync can supply official course and assignment records after school authorization.
 

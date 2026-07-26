@@ -34,6 +34,7 @@ async function captureActiveTab() {
     }
   });
   if (!result?.result) throw new Error("Canvas page details could not be read.");
+  await chrome.storage.session.set({ pendingCapture: result.result });
   return result.result;
 }
 
@@ -57,9 +58,12 @@ async function createImportHandoff(capture) {
 }
 
 async function sendCapture(capture) {
-  const handoff = await createImportHandoff(capture);
+  const pending = capture || (await chrome.storage.session.get("pendingCapture")).pendingCapture;
+  if (!pending) throw new Error("Read the Canvas page again before sending it.");
+  const handoff = await createImportHandoff(pending);
   const url = `${CLASSPILOT_URL}?import=${encodeURIComponent(handoff.code)}`;
   await chrome.tabs.create({ url });
+  await chrome.storage.session.remove("pendingCapture");
   return handoff;
 }
 

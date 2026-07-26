@@ -15,10 +15,9 @@ CANVAS_SCOPES = "url:GET|/api/v1/courses url:GET|/api/v1/courses/:course_id url:
 [ai]
 binding = "AI"
 
-# Create this namespace before enabling Canvas Companion imports:
-# [[kv_namespaces]]
-# binding = "IMPORT_HANDOFFS"
-# id = "replace_with_import_handoffs_namespace_id"
+[[kv_namespaces]]
+binding = "IMPORT_HANDOFFS"
+id = "80212536bbd441ab99eaaf2c0b7f4f37"
 
 # Add a CANVAS_SESSIONS KV binding after creating the namespace:
 # [[kv_namespaces]]

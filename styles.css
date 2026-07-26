@@ -1795,6 +1795,37 @@ h3 {
   font-size: 1rem;
 }
 
+.canvas-companion-download {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 9px 12px;
+  border: 1px solid var(--teal);
+  border-radius: var(--radius-sm);
+  background: var(--teal);
+  color: var(--surface);
+  font-size: 0.86rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.canvas-companion-download:hover {
+  border-color: var(--ink-2);
+  background: var(--ink-2);
+}
+
+.canvas-companion-download:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.canvas-companion-download svg {
+  width: 17px;
+  height: 17px;
+}
+
 #canvasConnectForm {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) auto;

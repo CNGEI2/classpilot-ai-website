@@ -44,6 +44,8 @@ test("service worker captures only after a popup request and sends bounded JSON"
   assert.match(source, /ClassPilotCanvasCapture\.captureCanvasPage/);
   assert.match(source, /createImportHandoff/);
   assert.match(source, /\/api\/import-handoffs/);
+  assert.match(source, /chrome\.storage\.session\.set/);
+  assert.match(source, /chrome\.storage\.session\.remove/);
   assert.match(source, /cngei2\.github\.io\/classpilot-ai-website\//);
   assert.match(source, /\?import=\$\{encodeURIComponent\(handoff\.code\)\}/);
   assert.doesNotMatch(source, /document\.cookie|localStorage|password|accessToken/);

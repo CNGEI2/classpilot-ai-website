@@ -901,6 +901,15 @@ test("calendar and data views expose complete controls", () => {
   assert.doesNotMatch(html, /id="calendarGrid"[^>]*role="grid"/i);
 });
 
+test("Data provides the installable Canvas Companion when OAuth is unavailable", () => {
+  assert.equal(tagForId("canvasCompanionDownload"), "a");
+  assert.match(
+    html,
+    /id="canvasCompanionDownload"[^>]*href="downloads\/ClassPilot-Canvas-Companion\.zip"[^>]*download/
+  );
+  assert.match(html, /Download Canvas Companion/);
+});
+
 test("named Calendar containers do not use the implicit generic role", () => {
   const labelledGenericDivs = html.match(
     /<div\b(?=[^>]*\baria-label=)(?![^>]*\brole=)[^>]*>/gi

@@ -41,12 +41,22 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install packaging dependencies
+        run: npm ci
+      - name: Package Canvas Companion
+        run: npm run package:extension
       - name: Prepare static site
         run: |
           rm -rf site-dist
           mkdir -p site-dist
           cp index.html app.js logic.js planner.js study-scheduler.js file-readers.js source-evidence.js submission-checker.js canvas-connector.js coach.js styles.css .nojekyll site-dist/
           cp -R vendor site-dist/vendor
+          mkdir -p site-dist/downloads
+          cp dist/ClassPilot-Canvas-Companion.zip site-dist/downloads/
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload Pages artifact
