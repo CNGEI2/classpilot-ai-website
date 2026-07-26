@@ -66,6 +66,12 @@ test("release documentation explains the secure Coach boundary", () => {
   assert.match(workerReadme, /wrangler secret put OPENAI_API_KEY/);
   assert.match(workerReadme, /COACH_MODE.*mock/s);
   assert.match(workerReadme, /COACH_MODE.*live/s);
+  assert.match(workerReadme, /COACH_MODE.*workers_ai/s);
+  assert.match(workerReadme, /WORKERS_AI_MODEL/);
+  assert.match(workerReadme, /\[ai\][\s\S]*binding\s*=\s*"AI"/);
   assert.match(workerReadme, /ALLOWED_ORIGIN/);
+  assert.match(readme, /Cloudflare Workers AI/);
+  assert.match(readme, /Today.*focus.*automatic.*study/s);
+  assert.match(readme, /Final check.*Canvas/s);
   assert.doesNotMatch(frontendRuntime, /OPENAI_API_KEY/);
 });

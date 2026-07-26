@@ -6,9 +6,9 @@ Live site: [https://cngei2.github.io/classpilot-ai-website/](https://cngei2.gith
 
 ## Product
 
-ClassPilot has four views:
+ClassPilot has four primary views:
 
-- **Today** prioritizes the next action, starts a 25-minute focus session in one click, and automatically schedules remaining study blocks.
+- **Today** prioritizes the next action, starts a 25-minute focus session in one click, and builds an automatic study schedule from the work that remains.
 - **Courses** keeps syllabi, searchable assignments, requirements, deliverables, completion steps, submission checks, and course guidance together.
 - **Conversational AI Coach** uses the selected course and assignment context for follow-up questions, requirement checks, and practical work plans. Each course and assignment keeps a separate browser-local conversation.
 - **Calendar** combines assignment, exam, and automatically replanned study-session dates and exports visible dates as an ICS file.
@@ -34,9 +34,9 @@ Open an assignment and choose **Ask Coach** to carry that exact assignment into 
 
 Coach evidence is built from a bounded source catalog for only the selected course and assignment. Live responses must return a valid source ID; citations with invented IDs are removed by the Worker, while accepted citations show the original source location and excerpt. Select a citation to return to its course or assignment context. Assignment-level Coach next steps include **Add task**, which adds an editable, duplicate-safe task only to that assignment.
 
-The static site never contains an OpenAI API key. Coach requests go through the deployed Cloudflare Worker at `https://classpilot-ai-coach.cngei2-classpilot.workers.dev/api/coach`, which validates the origin and payload, removes unexpected fields, applies request limits, and calls the OpenAI Responses API with `store: false` in live mode. The public deployment currently uses visibly labeled Mock mode until an `OPENAI_API_KEY` Worker secret is configured.
+The static site never contains a model API key. Coach requests go through the deployed Cloudflare Worker at `https://classpilot-ai-coach.cngei2-classpilot.workers.dev/api/coach`, which validates the origin and payload, removes unexpected fields, applies request limits, and uses a Cloudflare Workers AI binding for the public conversational service. OpenAI Responses remains an optional server-side provider and uses `store: false` when enabled.
 
-For interface testing without an API key, open the site with `?coach=mock`. Mock mode is visibly labeled and returns deterministic local guidance; it never claims to be a live AI response.
+For deterministic interface testing, open the site with `?coach=mock`. Practice mode is visibly labeled and returns local guidance; it never claims to be a live AI response.
 
 ## Data And Privacy
 
@@ -44,7 +44,9 @@ ClassPilot stores its workspace and Coach conversation history in this browser. 
 
 Export a JSON backup before changing browsers or clearing data. Restore deeply validates course, assignment, and task records before replacing the current workspace. Transient storage failures remain retryable, and restore or clear can recover from corrupt version 7 data. The current workspace uses schema version 7 and migrates the prior version 6 local course storage on first load while retaining the version 6 value as a recovery copy.
 
-This release does not provide notifications after the page closes or live cross-device synchronization. Live Coach responses require a server-side OpenAI API key. Live Canvas sync requires a school-approved Canvas Developer Key; the product returns a clear configuration status until that approval is installed.
+This release does not provide notifications after the page closes or live cross-device synchronization. The public Coach uses Cloudflare Workers AI; the optional OpenAI provider still requires a server-side key. Live Canvas sync requires a school-approved Canvas Developer Key, so the product returns a clear configuration status until that approval is installed.
+
+The complete personal workflow is intentionally connected: **Final check** evaluates the student's proposed submission before the deadline, while **Canvas** sync can supply official course and assignment records after school authorization.
 
 ## Local Development
 

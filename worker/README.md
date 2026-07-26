@@ -1,13 +1,14 @@
 # ClassPilot Coach And Canvas Worker
 
-This Worker is the security boundary between the public GitHub Pages frontend and the OpenAI Responses API. It accepts only `POST /api/coach`, validates a bounded selected-course payload, applies origin and rate limits, and never returns secrets or raw upstream errors.
+This Worker is the security boundary between the public GitHub Pages frontend and its model providers. It accepts only `POST /api/coach`, validates a bounded selected-course payload, applies origin and rate limits, and never returns secrets or raw upstream errors.
 
 Each request may include a bounded source catalog generated from only the selected course and assignment. Both mock and live responses use evidence objects with `sourceId`, `label`, `excerpt`, and `location`. The Worker drops evidence whose source ID is absent from the request and replaces mismatched excerpts with trusted source text. The live prompt requires source IDs for factual course claims and places unknown information in `missingInformation`.
 
 ## Modes
 
-- `COACH_MODE=mock` returns deterministic, visibly labeled test guidance without an OpenAI request.
-- `COACH_MODE=live` calls the model configured by `OPENAI_MODEL` and requires the `OPENAI_API_KEY` Worker secret.
+- `COACH_MODE=workers_ai` uses the `AI` binding and the model configured by `WORKERS_AI_MODEL`. This is the public default.
+- `COACH_MODE=mock` returns deterministic, visibly labeled test guidance without a model request.
+- `COACH_MODE=live` calls the optional OpenAI model configured by `OPENAI_MODEL` and requires the `OPENAI_API_KEY` Worker secret.
 
 ## Configuration
 
@@ -16,22 +17,30 @@ The checked-in `wrangler.toml` contains only non-secret deployment settings:
 ```toml
 [vars]
 ALLOWED_ORIGIN = "https://cngei2.github.io"
-COACH_MODE = "mock"
+COACH_MODE = "workers_ai"
+WORKERS_AI_MODEL = "@cf/zai-org/glm-4.7-flash"
 OPENAI_MODEL = "gpt-5-mini"
 ENVIRONMENT = "production"
+
+[ai]
+binding = "AI"
 ```
 
 `ALLOWED_ORIGIN` accepts an exact comma-separated allowlist. Do not use `*` in production. Localhost origins are accepted only when `ENVIRONMENT=development`.
 
-## Deploy Mock Mode
+## Deploy The Conversational Coach
 
 ```bash
 npx wrangler deploy --config worker/wrangler.toml
 ```
 
-The resulting Worker URL can be tested without an API key. Keep the frontend visibly labeled as Mock during this stage.
+Wrangler creates the Workers AI binding from `[ai]`. The default multilingual dialogue model receives bounded multi-turn messages and returns the same validated response contract used by the optional OpenAI provider.
 
-## Enable Live Mode
+Workers AI usage is billed to the Cloudflare account according to the selected model. Keep `WORKERS_AI_MODEL` in configuration so a model can be changed without modifying frontend code.
+
+For deterministic local interface testing, set `COACH_MODE=mock`; the frontend labels those replies as Practice mode.
+
+## Optional OpenAI Provider
 
 Store the key as a Worker secret. Never put it in `wrangler.toml`, `index.html`, JavaScript, localStorage, GitHub Actions logs, or a chat message.
 
