@@ -4,6 +4,8 @@ This Worker is the security boundary between the public GitHub Pages frontend an
 
 Each request may include a bounded source catalog generated from only the selected course and assignment. Both mock and live responses use evidence objects with `sourceId`, `label`, `excerpt`, and `location`. The Worker drops evidence whose source ID is absent from the request and replaces mismatched excerpts with trusted source text. The live prompt requires source IDs for factual course claims and places unknown information in `missingInformation`.
 
+Every validated Coach response includes a learning `phase`, zero or one `currentStep`, zero or one `checkpointQuestion`, and `waitingForStudent`. The Coach gives one action or one diagnostic question, then waits for the student. It makes a step smaller when the student is stuck, reviews one high-impact issue at a time, and does not produce a complete assessed submission.
+
 ## Modes
 
 - `COACH_MODE=workers_ai` uses the `AI` binding and the model configured by `WORKERS_AI_MODEL`. This is the public default.
@@ -18,7 +20,7 @@ The checked-in `wrangler.toml` contains only non-secret deployment settings:
 [vars]
 ALLOWED_ORIGIN = "https://cngei2.github.io"
 COACH_MODE = "workers_ai"
-WORKERS_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast"
+WORKERS_AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
 OPENAI_MODEL = "gpt-5-mini"
 ENVIRONMENT = "production"
 

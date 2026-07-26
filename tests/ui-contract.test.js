@@ -4496,9 +4496,11 @@ test("course tabs provide semantic panels and roving keyboard navigation", async
 
 test("the Coach runtime loads before app.js and exposes the complete conversation controls", () => {
   const sourceScript = html.indexOf('src="source-evidence.js?v=17"');
-  const coachScript = html.indexOf('src="coach.js?v=16"');
-  const appScript = html.indexOf('src="app.js?v=16"');
+  const coachScript = html.indexOf('src="coach.js?v=17"');
+  const appScript = html.indexOf('src="app.js?v=17"');
+  const styleSheet = html.indexOf('href="styles.css?v=17"');
   assert.ok(sourceScript > 0);
+  assert.ok(styleSheet > 0);
   assert.ok(coachScript > 0);
   assert.ok(coachScript > sourceScript);
   assert.ok(appScript > coachScript);

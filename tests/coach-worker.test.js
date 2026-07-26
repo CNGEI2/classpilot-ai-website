@@ -260,7 +260,7 @@ test("Workers AI mode falls back to trusted assignment evidence when the model o
     COACH_MODE: "workers_ai",
     AI: {
       async run(model, options) {
-        assert.equal(model, "@cf/meta/llama-3.1-8b-instruct-fast");
+        assert.equal(model, "@cf/qwen/qwen3-30b-a3b-fp8");
         assert.equal(options.chat_template_kwargs, undefined);
         return {
           choices: [{ message: { content: JSON.stringify(coachResponse({

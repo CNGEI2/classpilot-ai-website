@@ -1176,7 +1176,7 @@ async function workersAiCoachResponse(payload, env) {
   if (!env.AI || typeof env.AI.run !== "function") {
     throw publicError("not_configured", "The conversational AI Coach is not configured yet.", 503);
   }
-  const model = cleanText(env.WORKERS_AI_MODEL, 180) || "@cf/meta/llama-3.1-8b-instruct-fast";
+  const model = cleanText(env.WORKERS_AI_MODEL, 180) || "@cf/qwen/qwen3-30b-a3b-fp8";
   const contextMessage = JSON.stringify({
     task: payload.context.action,
     language: payload.context.language,

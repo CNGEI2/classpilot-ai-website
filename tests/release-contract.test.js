@@ -11,6 +11,18 @@ const workflow = fs.readFileSync(
 );
 const readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
 const workerReadmePath = path.join(__dirname, "..", "worker", "README.md");
+const wrangler = fs.readFileSync(
+  path.join(__dirname, "..", "worker", "wrangler.toml"),
+  "utf8"
+);
+const wranglerExample = fs.readFileSync(
+  path.join(__dirname, "..", "worker", "wrangler.toml.example"),
+  "utf8"
+);
+const workerSource = fs.readFileSync(
+  path.join(__dirname, "..", "worker", "worker.mjs"),
+  "utf8"
+);
 const frontendRuntime = [
   "index.html",
   "app.js",
@@ -82,6 +94,24 @@ test("release documentation explains the secure Coach boundary", () => {
   assert.match(readme, /Today.*focus.*automatic.*study/s);
   assert.match(readme, /Final check.*Canvas/s);
   assert.doesNotMatch(frontendRuntime, /OPENAI_API_KEY/);
+});
+
+test("release config and documentation describe adaptive one-step coaching", () => {
+  const workerReadme = fs.readFileSync(workerReadmePath, "utf8");
+  const model = /WORKERS_AI_MODEL\s*=\s*"@cf\/qwen\/qwen3-30b-a3b-fp8"/;
+
+  assert.match(wrangler, model);
+  assert.match(wranglerExample, model);
+  assert.match(workerSource, /@cf\/qwen\/qwen3-30b-a3b-fp8/);
+  assert.match(wranglerExample, /\[ai\][\s\S]*binding\s*=\s*"AI"/);
+  assert.match(readme, /one small step/i);
+  assert.match(readme, /Done, continue/);
+  assert.match(readme, /I'm stuck/);
+  assert.match(readme, /Check my idea/);
+  assert.match(workerReadme, /currentStep/);
+  assert.match(workerReadme, /checkpointQuestion/);
+  assert.match(workerReadme, /waits for the student/i);
+  assert.doesNotMatch(readme, /guaranteed grade|completes? the assignment for you/i);
 });
 
 test("release includes a documented and downloadable Canvas Companion", async () => {

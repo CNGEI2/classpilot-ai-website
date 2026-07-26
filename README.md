@@ -10,7 +10,7 @@ ClassPilot has four primary views:
 
 - **Today** prioritizes the next action, starts a 25-minute focus session in one click, and builds an automatic study schedule from the work that remains.
 - **Courses** keeps syllabi, searchable assignments, requirements, deliverables, completion steps, submission checks, and course guidance together.
-- **Conversational AI Coach** uses the selected course and assignment context for follow-up questions, requirement checks, and practical work plans. Each course and assignment keeps a separate browser-local conversation.
+- **Conversational AI Coach** uses the selected course and assignment context to guide one small step at a time. It waits for the student's response before adapting the next question, hint, or action, and each course and assignment keeps a separate browser-local conversation.
 - **Calendar** combines assignment, exam, and automatically replanned study-session dates and exports visible dates as an ICS file.
 - **Data** connects approved Canvas accounts, exports and restores JSON backups, and lets the student explicitly clear local data.
 
@@ -44,9 +44,11 @@ Canvas tokens never enter the static site or `localStorage`. The Worker stores O
 
 ## AI Coach
 
-Open an assignment and choose **Ask Coach** to carry that exact assignment into the Coach tab. Quick questions explain the assignment, identify the next step, check requirements, or make a plan. Responses show the course evidence they rely on, and English, Chinese, and bilingual modes are available.
+Open an assignment and choose **Ask Coach** to carry that exact assignment into the Coach tab. Start with **Help me start**, **I'm stuck**, **Check my idea**, or a question in your own words. The Coach identifies the student's current phase, gives no more than one small step, asks at most one checkpoint question, and waits for the student before continuing. English, Chinese, and bilingual modes are available.
 
-Coach evidence is built from a bounded source catalog for only the selected course and assignment. Live responses must return a valid source ID; citations with invented IDs are removed by the Worker, while accepted citations show the original source location and excerpt. Select a citation to return to its course or assignment context. Assignment-level Coach next steps include **Add task**, which adds an editable, duplicate-safe task only to that assignment.
+Coach evidence is built from a bounded source catalog for only the selected course and assignment. Live responses must return a valid source ID; citations with invented IDs are removed by the Worker, while accepted citations show the original source location and excerpt. Select a citation to return to its course or assignment context. The current step offers **Done, continue**, **I'm stuck**, and **Check my idea**. Its optional **Add task** action adds one editable, duplicate-safe task only to that assignment.
+
+The Coach supports student thinking rather than replacing it. When a student is stuck, it makes the same step smaller or offers one hint. When a student shares work, it addresses the highest-impact issue first. It does not write a complete assessed submission, invent instructor requirements, or promise a grade.
 
 The static site never contains a model API key. Coach requests go through the deployed Cloudflare Worker at `https://classpilot-ai-coach.cngei2-classpilot.workers.dev/api/coach`, which validates the origin and payload, removes unexpected fields, applies request limits, and uses a Cloudflare Workers AI binding for the public conversational service. OpenAI Responses remains an optional server-side provider and uses `store: false` when enabled.
 
