@@ -2,6 +2,8 @@ const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const MAX_BODY_CHARACTERS = 64000;
 const MAX_IMPORT_BODY_CHARACTERS = 140000;
 const MAX_IMPORT_RAW_CHARACTERS = 100000;
+const MAX_CALENDAR_REQUEST_CHARACTERS = 4096;
+const MAX_CALENDAR_FEED_CHARACTERS = 1000000;
 const MAX_HISTORY_MESSAGES = 8;
 const RATE_WINDOW_MS = 60000;
 const RATE_LIMIT = 20;
@@ -764,6 +766,117 @@ export async function handleImportHandoffRequest(request, env = {}, runtime = {}
   }
 }
 
+function canvasCalendarFeedUrl(value, env) {
+  const source = String(value || "").trim().replace(/^webcal:/i, "https:");
+  try {
+    const url = new URL(source);
+    const hostname = url.hostname.toLowerCase();
+    const configured = cleanText(env.CANVAS_ALLOWED_DOMAINS, 4000)
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+    const allowedHost = hostname.endsWith(".instructure.com") || configured.includes(hostname);
+    const allowedPath = /^\/feeds\/calendars\/[a-z0-9._~-]+\.ics$/i.test(url.pathname);
+    if (url.protocol !== "https:" || url.username || url.password || url.port ||
+        url.hash || !allowedHost || !allowedPath) {
+      throw new Error("invalid");
+    }
+    return url;
+  } catch (_error) {
+    throw publicError(
+      "invalid_calendar_feed",
+      "Enter a valid Canvas calendar feed URL from an allowed school.",
+      400
+    );
+  }
+}
+
+async function readCalendarRequest(request) {
+  const declaredLength = Number(request.headers.get("Content-Length")) || 0;
+  if (declaredLength > MAX_CALENDAR_REQUEST_CHARACTERS) {
+    throw publicError("payload_too_large", "The calendar request is too large.", 413);
+  }
+  const raw = await request.text();
+  if (raw.length > MAX_CALENDAR_REQUEST_CHARACTERS) {
+    throw publicError("payload_too_large", "The calendar request is too large.", 413);
+  }
+  try {
+    const value = JSON.parse(raw);
+    if (!value || typeof value !== "object") throw new Error("invalid");
+    return value;
+  } catch (_error) {
+    throw publicError("invalid_json", "Send a valid calendar request.", 400);
+  }
+}
+
+export async function handleCalendarFeedRequest(request, env = {}, runtime = {}) {
+  const url = new URL(request.url);
+  if (url.pathname !== "/api/calendar-feed") {
+    return jsonResponse({ code: "not_found", message: "Not found." }, 404);
+  }
+  const origin = allowedOrigin(request, env);
+  if (!origin) {
+    return jsonResponse({
+      code: "origin_forbidden",
+      message: "This site is not allowed to use Canvas calendar sync."
+    }, 403);
+  }
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders(origin) });
+  }
+  if (request.method !== "POST") {
+    return jsonResponse({ code: "method_not_allowed", message: "Use POST for calendar sync." }, 405, origin);
+  }
+
+  try {
+    await enforceImportRateLimit(request, runtime);
+    const payload = await readCalendarRequest(request);
+    const feedUrl = canvasCalendarFeedUrl(payload.feedUrl, env);
+    const fetchImpl = runtime.fetchImpl || fetch;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    let response;
+    try {
+      response = await fetchImpl(feedUrl.toString(), {
+        method: "GET",
+        redirect: "manual",
+        headers: { Accept: "text/calendar, text/plain;q=0.9" },
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        throw publicError("calendar_timeout", "Canvas calendar sync timed out.", 504);
+      }
+      throw publicError("calendar_unavailable", "Canvas calendar sync is temporarily unavailable.", 502);
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (response.status >= 300 && response.status < 400) {
+      throw publicError("calendar_redirect_blocked", "Canvas redirected the calendar feed. Copy a fresh feed URL.", 502);
+    }
+    if (!response.ok) {
+      throw publicError("calendar_unavailable", "Canvas could not return this calendar feed.", 502);
+    }
+    const contentLength = Number(response.headers.get("Content-Length")) || 0;
+    if (contentLength > MAX_CALENDAR_FEED_CHARACTERS) {
+      throw publicError("calendar_too_large", "The Canvas calendar feed is too large.", 413);
+    }
+    const ics = await response.text();
+    if (ics.length > MAX_CALENDAR_FEED_CHARACTERS) {
+      throw publicError("calendar_too_large", "The Canvas calendar feed is too large.", 413);
+    }
+    if (!/^BEGIN:VCALENDAR(?:\r?\n|$)/i.test(ics.trimStart())) {
+      throw publicError("invalid_calendar_feed", "Canvas returned an invalid calendar feed.", 502);
+    }
+    return jsonResponse({ domain: feedUrl.hostname.toLowerCase(), ics }, 200, origin);
+  } catch (error) {
+    return jsonResponse({
+      code: error?.publicCode || "internal_error",
+      message: error?.publicCode ? error.message : "ClassPilot could not sync the Canvas calendar."
+    }, error?.publicStatus || 500, origin);
+  }
+}
+
 async function enforceRateLimit(request, env, runtime) {
   const key = cleanText(request.headers.get("CF-Connecting-IP") || "anonymous", 160);
   if (env.COACH_RATE_LIMITER && typeof env.COACH_RATE_LIMITER.limit === "function") {
@@ -1104,6 +1217,7 @@ export async function handleCoachRequest(request, env = {}, runtime = {}) {
 export default {
   fetch(request, env) {
     const pathname = new URL(request.url).pathname;
+    if (pathname === "/api/calendar-feed") return handleCalendarFeedRequest(request, env);
     if (pathname.startsWith("/api/canvas/")) return handleCanvasRequest(request, env);
     if (pathname.startsWith("/api/import-handoffs")) {
       return handleImportHandoffRequest(request, env);

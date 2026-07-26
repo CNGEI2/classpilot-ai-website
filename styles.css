@@ -1833,6 +1833,35 @@ h3 {
   align-items: end;
 }
 
+.canvas-calendar-connection {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.canvas-calendar-connection h3 {
+  margin: 0 0 12px;
+  font-size: 0.86rem;
+}
+
+#canvasCalendarForm {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+#canvasCalendarStatus {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+#canvasCalendarDisconnect {
+  margin-top: 10px;
+  color: var(--danger);
+}
+
 #canvasStatus {
   margin: 12px 0 0;
   color: var(--muted);
@@ -2247,7 +2276,8 @@ dialog form > div {
     font-size: 4rem;
   }
 
-  #canvasConnectForm {
+  #canvasConnectForm,
+  #canvasCalendarForm {
     grid-template-columns: 1fr;
   }
 

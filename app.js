@@ -40,6 +40,11 @@ const {
   normalizeCanvasDomain
 } = window.ClassPilotCanvasConnector;
 const {
+  mergeCanvasCalendar,
+  normalizeCanvasCalendarFeedUrl,
+  parseCanvasCalendarFeed
+} = window.ClassPilotCanvasCalendar;
+const {
   buildCoachContext,
   coachThreadKey,
   createThreadStore,
@@ -79,7 +84,14 @@ const importHandoffEndpoint = document
   ?.getAttribute("content")
   ?.trim()
   ?.replace(/\/$/, "") || "";
+const canvasCalendarEndpoint = document
+  .querySelector('meta[name="classpilot-calendar-feed-endpoint"]')
+  ?.getAttribute("content")
+  ?.trim()
+  ?.replace(/\/$/, "") || "";
 const CANVAS_SESSION_KEY = "classpilot-canvas-session";
+const CANVAS_CALENDAR_FEED_KEY = "classpilot-canvas-calendar-feed";
+const CANVAS_CALENDAR_SYNC_KEY = "classpilot-canvas-calendar-synced-at";
 
 const elements = {
   appNav: document.querySelector("#appNav"),
@@ -90,6 +102,11 @@ const elements = {
   calendarView: document.querySelector("#calendarView"),
   canvasConnect: document.querySelector("#canvasConnect"),
   canvasConnectForm: document.querySelector("#canvasConnectForm"),
+  canvasCalendarDisconnect: document.querySelector("#canvasCalendarDisconnect"),
+  canvasCalendarForm: document.querySelector("#canvasCalendarForm"),
+  canvasCalendarStatus: document.querySelector("#canvasCalendarStatus"),
+  canvasCalendarSync: document.querySelector("#canvasCalendarSync"),
+  canvasCalendarUrl: document.querySelector("#canvasCalendarUrl"),
   canvasDisconnect: document.querySelector("#canvasDisconnect"),
   canvasDomain: document.querySelector("#canvasDomain"),
   canvasStatus: document.querySelector("#canvasStatus"),
@@ -147,6 +164,7 @@ const state = {
   calendarCursor: new Date(),
   calendarTypeFilter: "all",
   canvasBusy: false,
+  canvasCalendarBusy: false,
   canvasConnected: false,
   canvasDomain: "",
   assignmentFilters: new Map(),
@@ -2054,6 +2072,113 @@ function renderCanvasConnection() {
       : "Canvas is not connected.";
 }
 
+function storedCanvasCalendarFeed() {
+  try {
+    return String(localStorage.getItem(CANVAS_CALENDAR_FEED_KEY) || "").trim();
+  } catch (_error) {
+    return "";
+  }
+}
+
+function storedCanvasCalendarSyncTime() {
+  try {
+    return String(localStorage.getItem(CANVAS_CALENDAR_SYNC_KEY) || "").trim();
+  } catch (_error) {
+    return "";
+  }
+}
+
+function storeCanvasCalendarFeed(feedUrl, syncedAt = "") {
+  try {
+    if (feedUrl) localStorage.setItem(CANVAS_CALENDAR_FEED_KEY, feedUrl);
+    else localStorage.removeItem(CANVAS_CALENDAR_FEED_KEY);
+    if (syncedAt) localStorage.setItem(CANVAS_CALENDAR_SYNC_KEY, syncedAt);
+    else if (!feedUrl) localStorage.removeItem(CANVAS_CALENDAR_SYNC_KEY);
+    return true;
+  } catch (_error) {
+    showStatus("Calendar feed storage is unavailable in this browser.", "warn");
+    return false;
+  }
+}
+
+function renderCanvasCalendarConnection() {
+  if (!elements.canvasCalendarForm) return;
+  const savedFeed = storedCanvasCalendarFeed();
+  const syncedAt = storedCanvasCalendarSyncTime();
+  if (!elements.canvasCalendarUrl.value && savedFeed) {
+    elements.canvasCalendarUrl.value = savedFeed;
+  }
+  elements.canvasCalendarUrl.disabled = state.canvasCalendarBusy;
+  elements.canvasCalendarSync.disabled = state.canvasCalendarBusy;
+  elements.canvasCalendarDisconnect.disabled = state.canvasCalendarBusy;
+  elements.canvasCalendarDisconnect.hidden = !savedFeed;
+  elements.canvasCalendarStatus.textContent = state.canvasCalendarBusy
+    ? "Canvas calendar sync in progress..."
+    : syncedAt
+      ? "Calendar last synced " + new Date(syncedAt).toLocaleString() + "."
+      : savedFeed
+        ? "Calendar feed is ready to sync."
+        : "Calendar feed is not connected.";
+}
+
+async function syncCanvasCalendar(event) {
+  event?.preventDefault?.();
+  const feedUrl = normalizeCanvasCalendarFeedUrl(
+    elements.canvasCalendarUrl.value || storedCanvasCalendarFeed()
+  );
+  if (!feedUrl) {
+    showStatus("Paste a valid Canvas calendar feed URL.", "warn");
+    elements.canvasCalendarUrl.focus();
+    return false;
+  }
+  if (!canvasCalendarEndpoint) {
+    showStatus("Canvas calendar sync is not configured yet.", "warn");
+    return false;
+  }
+  state.canvasCalendarBusy = true;
+  renderCanvasCalendarConnection();
+  showStatus("Syncing Canvas deadlines...");
+  try {
+    const response = await fetch(canvasCalendarEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feedUrl })
+    });
+    const value = await response.json().catch(() => ({}));
+    if (!response.ok || !value.ics) {
+      throw new Error(value.message || "Canvas calendar sync failed.");
+    }
+    const snapshot = parseCanvasCalendarFeed(value.ics, feedUrl);
+    const nextWorkspace = mergeCanvasCalendar(workspace, snapshot);
+    const syncedAt = new Date().toISOString();
+    if (!commitWorkspace(nextWorkspace, { render: false })) return false;
+    if (!storeCanvasCalendarFeed(feedUrl, syncedAt)) return false;
+    renderAll();
+    showStatus(
+      "Canvas calendar sync complete: " + snapshot.importedEventCount +
+        " item" + (snapshot.importedEventCount === 1 ? "" : "s") +
+        " updated across " + snapshot.courses.length + " course" +
+        (snapshot.courses.length === 1 ? "" : "s") + ".",
+      snapshot.skippedEventCount ? "warn" : "success"
+    );
+    return true;
+  } catch (error) {
+    showStatus(error.message || "Canvas calendar sync failed.", "warn");
+    return false;
+  } finally {
+    state.canvasCalendarBusy = false;
+    renderCanvasCalendarConnection();
+  }
+}
+
+function disconnectCanvasCalendar() {
+  storeCanvasCalendarFeed("");
+  elements.canvasCalendarUrl.value = "";
+  renderCanvasCalendarConnection();
+  showStatus("Canvas calendar feed removed from this browser.", "success");
+  return true;
+}
+
 async function syncCanvas() {
   if (!storedCanvasSession()) return false;
   state.canvasBusy = true;
@@ -2268,6 +2393,7 @@ function renderDataView() {
     : "No backup exported yet.";
   elements.restoreBackup.disabled = !pendingBackup;
   renderCanvasConnection();
+  renderCanvasCalendarConnection();
 }
 
 function renderData() {
@@ -3963,6 +4089,8 @@ elements.calendarTypeFilter.addEventListener("change", () => {
 });
 elements.exportCalendar.addEventListener("click", downloadCalendar);
 elements.canvasConnectForm.addEventListener("submit", connectCanvas);
+elements.canvasCalendarForm.addEventListener("submit", syncCanvasCalendar);
+elements.canvasCalendarDisconnect.addEventListener("click", disconnectCanvasCalendar);
 elements.canvasSync.addEventListener("click", () => { void syncCanvas(); });
 elements.canvasDisconnect.addEventListener("click", () => { void disconnectCanvas(); });
 elements.exportBackup.addEventListener("click", downloadBackup);

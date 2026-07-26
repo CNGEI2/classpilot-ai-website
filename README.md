@@ -32,6 +32,10 @@ Download the current package: [`ClassPilot-Canvas-Companion.zip`](https://cngei2
 
 The extension uses temporary `activeTab` access after an explicit student click. It never reads Canvas passwords, SSO credentials, MFA codes, cookies, or personal access tokens. The Worker keeps the sanitized capture for at most ten minutes, returns an opaque one-time code, and deletes the capture when ClassPilot redeems it. See [`extension/README.md`](extension/README.md) for installation, permissions, privacy, and removal instructions.
 
+### Canvas Calendar Feed Without A Developer Key
+
+Paste the private Canvas calendar feed URL once in **Data > Canvas** to refresh assignment deadlines and course-level exam dates. Calendar events merge by Canvas course and assignment identity, so they update existing records instead of creating another course. The feed URL stays only in that browser's local storage, is excluded from workspace backups, and is sent only when the student selects **Sync calendar**.
+
 ### Optional Institution OAuth
 
 ClassPilot includes a read-only Canvas OAuth flow. After authorization, **Sync now** imports the student's active courses, syllabi, assignments, due dates, points, submission state, and allowed file types. Stable Canvas IDs keep repeated syncs in the same course and preserve completed ClassPilot tasks.
@@ -54,7 +58,7 @@ ClassPilot stores its workspace and Coach conversation history in this browser. 
 
 Export a JSON backup before changing browsers or clearing data. Restore deeply validates course, assignment, and task records before replacing the current workspace. Transient storage failures remain retryable, and restore or clear can recover from corrupt version 7 data. The current workspace uses schema version 7 and migrates the prior version 6 local course storage on first load while retaining the version 6 value as a recovery copy.
 
-This release does not provide notifications after the page closes or live cross-device synchronization. The public Coach uses Cloudflare Workers AI; the optional OpenAI provider still requires a server-side key. Full background Canvas API sync still requires a school-approved Canvas Developer Key, while Canvas Companion provides explicit one-page imports without that key.
+This release does not provide notifications after the page closes or live cross-device synchronization. The public Coach uses Cloudflare Workers AI; the optional OpenAI provider still requires a server-side key. Full background Canvas API sync still requires a school-approved Canvas Developer Key. Canvas Companion provides detailed one-page imports and the Canvas calendar feed refreshes deadlines without that key.
 
 The complete personal workflow is intentionally connected: **Final check** evaluates the student's proposed submission before the deadline, while **Canvas** sync can supply official course and assignment records after school authorization.
 

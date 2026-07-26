@@ -100,6 +100,12 @@ id = "the_namespace_id"
 
 `POST /api/import-handoffs` accepts only an explicit browser-extension capture. It removes unexpected fields and rejects over-limit content before storage. The opaque code expires after ten minutes. `POST /api/import-handoffs/redeem` accepts only the configured ClassPilot origin, deletes the record before returning it, and rejects a second redemption. Canvas passwords, cookies, session tokens, personal access tokens, and calendar-feed secrets are not accepted by the capture schema.
 
+## Enable Canvas Calendar Feed Sync
+
+`POST /api/calendar-feed` retrieves a student's private Canvas iCalendar feed without a Developer Key. The Worker accepts only an HTTPS `feeds/calendars/*.ics` URL on `*.instructure.com` or a hostname listed in `CANVAS_ALLOWED_DOMAINS`. It blocks redirects, limits the response to 1 MB, does not forward browser credentials, and does not store or return the feed URL.
+
+The public site stores the feed URL only in that browser's local storage. It is not included in the ClassPilot workspace or exported backup. Each refresh must be initiated from the Data view.
+
 ## Local Development
 
 Use `.dev.vars.example` as the field reference for local variables. The example contains no real secret. Run Worker tests without network access:

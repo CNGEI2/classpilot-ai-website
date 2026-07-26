@@ -53,7 +53,7 @@ jobs:
         run: |
           rm -rf site-dist
           mkdir -p site-dist
-          cp index.html app.js logic.js planner.js study-scheduler.js file-readers.js source-evidence.js submission-checker.js canvas-connector.js coach.js styles.css .nojekyll site-dist/
+          cp index.html app.js logic.js planner.js study-scheduler.js file-readers.js source-evidence.js submission-checker.js canvas-connector.js canvas-calendar.js coach.js styles.css .nojekyll site-dist/
           cp -R vendor site-dist/vendor
           mkdir -p site-dist/downloads
           cp dist/ClassPilot-Canvas-Companion.zip site-dist/downloads/

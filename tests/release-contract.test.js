@@ -21,6 +21,7 @@ const frontendRuntime = [
   "source-evidence.js",
   "submission-checker.js",
   "canvas-connector.js",
+  "canvas-calendar.js",
   "coach.js"
 ]
   .map((file) => fs.readFileSync(path.join(__dirname, "..", file), "utf8"))
@@ -54,9 +55,14 @@ test("Pages workflow uses least privilege and packages the verified runtime", ()
   assert.match(deployJob, /rm -rf site-dist/);
   assert.match(
     deployJob,
-    /cp index\.html app\.js logic\.js planner\.js study-scheduler\.js file-readers\.js source-evidence\.js submission-checker\.js canvas-connector\.js coach\.js styles\.css \.nojekyll site-dist\//
+    /cp index\.html app\.js logic\.js planner\.js study-scheduler\.js file-readers\.js source-evidence\.js submission-checker\.js canvas-connector\.js canvas-calendar\.js coach\.js styles\.css \.nojekyll site-dist\//
   );
   assert.match(deployJob, /cp -R vendor site-dist\/vendor/);
+});
+
+test("Pages publishes the Canvas calendar parser with the app", () => {
+  assert.match(workflow, /canvas-calendar\.js/);
+  assert.match(readme, /Canvas calendar feed/i);
 });
 
 test("release documentation explains the secure Coach boundary", () => {

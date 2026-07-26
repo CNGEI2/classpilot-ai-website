@@ -10,6 +10,7 @@ const logic = require("../logic.js");
 const planner = require("../planner.js");
 const studyScheduler = require("../study-scheduler.js");
 const canvasConnector = require("../canvas-connector.js");
+const canvasCalendar = require("../canvas-calendar.js");
 
 const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const appSource = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
@@ -271,6 +272,11 @@ class FakeDocument {
       "calendarView",
       "canvasConnect",
       "canvasConnectForm",
+      "canvasCalendarDisconnect",
+      "canvasCalendarForm",
+      "canvasCalendarStatus",
+      "canvasCalendarSync",
+      "canvasCalendarUrl",
       "canvasDisconnect",
       "canvasDomain",
       "canvasStatus",
@@ -374,6 +380,9 @@ class FakeDocument {
     if (selector === ".mobile-nav") return this.mobileNav;
     if (selector === 'meta[name="classpilot-canvas-endpoint"]') {
       return { getAttribute: () => "https://coach.example.workers.dev/api/canvas" };
+    }
+    if (selector === 'meta[name="classpilot-calendar-feed-endpoint"]') {
+      return { getAttribute: () => "https://coach.example.workers.dev/api/calendar-feed" };
     }
     if (selector.startsWith("#")) return this.elements.get(selector.slice(1)) || null;
     return null;
@@ -685,6 +694,7 @@ function runApp({
     ClassPilotPlanner: planner,
     ClassPilotStudyScheduler: studyScheduler,
     ClassPilotCanvasConnector: canvasConnector,
+    ClassPilotCanvasCalendar: canvasCalendar,
     console: {
       error: (...args) => errors.push(args),
       log: () => {},
@@ -908,6 +918,17 @@ test("Data provides the installable Canvas Companion when OAuth is unavailable",
     /id="canvasCompanionDownload"[^>]*href="downloads\/ClassPilot-Canvas-Companion\.zip"[^>]*download/
   );
   assert.match(html, /Download Canvas Companion/);
+});
+
+test("Data provides a local-only Canvas calendar feed connection", () => {
+  assert.equal(tagForId("canvasCalendarForm"), "form");
+  assert.equal(tagForId("canvasCalendarUrl"), "input");
+  assert.equal(tagForId("canvasCalendarSync"), "button");
+  assert.equal(tagForId("canvasCalendarDisconnect"), "button");
+  assert.equal(tagForId("canvasCalendarStatus"), "p");
+  assert.match(appSource, /classpilot-canvas-calendar-feed/);
+  assert.match(appSource, /parseCanvasCalendarFeed/);
+  assert.match(appSource, /mergeCanvasCalendar/);
 });
 
 test("named Calendar containers do not use the implicit generic role", () => {
@@ -3453,6 +3474,47 @@ test("Canvas OAuth completion performs one read-only sync into stable course rec
   assert.equal(saved.courses[0].assignments[0].source.canvasAssignmentId, "30244");
   assert.equal(app.sessionStorage.getItem("classpilot-canvas-session"), "session-12345");
   assert.match(app.document.elements.get("canvasStatus").textContent, /Connected to sfbu\.instructure\.com/);
+});
+
+test("Canvas calendar feed sync updates assignments and course-level exams in one action", async () => {
+  const feedUrl = "https://sfbu.instructure.com/feeds/calendars/user_secret.ics";
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "BEGIN:VEVENT",
+    "UID:assignment_30213@sfbu.instructure.com",
+    "DTSTART:20260729T065900Z",
+    "SUMMARY:Attend a seminar [AI450-A]",
+    "URL:https://sfbu.instructure.com/courses/1742/assignments/30213",
+    "END:VEVENT",
+    "BEGIN:VEVENT",
+    "UID:event_991@sfbu.instructure.com",
+    "DTSTART;VALUE=DATE:20260808",
+    "SUMMARY:Final Exam [AI450-A]",
+    "URL:https://sfbu.instructure.com/calendar?event_id=991&include_contexts=course_1742",
+    "END:VEVENT",
+    "END:VCALENDAR"
+  ].join("\r\n");
+  const app = runApp({
+    workspaceRaw: JSON.stringify(createWorkspace([])),
+    now: "2026-07-25T12:00:00Z",
+    fetchImpl: async (url, options) => {
+      assert.equal(String(url), "https://coach.example.workers.dev/api/calendar-feed");
+      assert.equal(options.method, "POST");
+      assert.deepEqual(JSON.parse(options.body), { feedUrl });
+      return Response.json({ domain: "sfbu.instructure.com", ics });
+    }
+  });
+  app.document.elements.get("canvasCalendarUrl").value = feedUrl;
+
+  await app.document.elements.get("canvasCalendarForm").dispatch("submit");
+
+  const saved = persistedWorkspace(app);
+  assert.equal(saved.courses.length, 1);
+  assert.equal(saved.courses[0].assignments[0].title, "Attend a seminar");
+  assert.equal(saved.courses[0].coursePlan.exams[0].label, "Final Exam");
+  assert.equal(app.localStorage.getItem("classpilot-canvas-calendar-feed"), feedUrl);
+  assert.match(app.document.elements.get("canvasCalendarStatus").textContent, /last synced/i);
+  assert.match(app.document.elements.get("appStatus").textContent, /2 items updated across 1 course/i);
 });
 
 test("startup redeems an extension import once without persisting its handoff code", () => {
