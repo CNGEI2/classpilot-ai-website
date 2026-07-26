@@ -6,6 +6,7 @@ const {
   coachThreadKey,
   createThreadStore,
   createCoachClient,
+  latestCoachState,
   validateCoachResponse
 } = require("../coach.js");
 
@@ -153,11 +154,21 @@ test("thread storage stays assignment-scoped and enforces message and character 
   assert.equal(store.get("course-a", "assignment-b").length, 1);
 });
 
-test("validateCoachResponse accepts the public contract and strips extra data", () => {
+test("validateCoachResponse accepts the one-step contract and strips extra data", () => {
   const value = validateCoachResponse({
-    answer: "Start by mapping each requirement to one scene.",
+    answer: "Start by choosing the requirement that is least clear.",
+    phase: "understand",
+    currentStep: {
+      id: "choose-requirement",
+      title: "Choose one requirement",
+      instruction: "Select the requirement you understand least.",
+      doneWhen: "You can name the requirement and explain what is unclear.",
+      estimatedMinutes: 90,
+      secret: "remove"
+    },
+    checkpointQuestion: "Which requirement did you choose, and what is unclear?",
+    waitingForStudent: true,
     evidence: [{ label: "Requirement", text: "Include one ethical dilemma", secret: "remove" }],
-    nextSteps: ["Draft the conflict"],
     missingInformation: [],
     usage: { inputTokens: 120, outputTokens: 40, private: "remove" },
     mode: "live",
@@ -165,19 +176,73 @@ test("validateCoachResponse accepts the public contract and strips extra data", 
   });
 
   assert.deepEqual(value, {
-    answer: "Start by mapping each requirement to one scene.",
+    answer: "Start by choosing the requirement that is least clear.",
+    phase: "understand",
+    currentStep: {
+      id: "choose-requirement",
+      title: "Choose one requirement",
+      instruction: "Select the requirement you understand least.",
+      doneWhen: "You can name the requirement and explain what is unclear.",
+      estimatedMinutes: 60
+    },
+    checkpointQuestion: "Which requirement did you choose, and what is unclear?",
+    waitingForStudent: true,
     evidence: [{
       sourceId: "",
       label: "Requirement",
       excerpt: "Include one ethical dilemma",
       location: ""
     }],
-    nextSteps: ["Draft the conflict"],
     missingInformation: [],
     usage: { inputTokens: 120, outputTokens: 40 },
     mode: "live"
   });
   assert.throws(() => validateCoachResponse({ answer: "" }), /answer/i);
+  assert.throws(
+    () => validateCoachResponse({ answer: "Continue.", phase: "unknown" }),
+    /phase/i
+  );
+});
+
+test("validateCoachResponse converts only the first legacy next step", () => {
+  const value = validateCoachResponse({
+    answer: "Use the first step.",
+    nextSteps: ["Draft the conflict", "Write the conclusion"]
+  });
+
+  assert.equal(value.phase, "diagnose");
+  assert.deepEqual(value.currentStep, {
+    id: "legacy-step",
+    title: "Next step",
+    instruction: "Draft the conflict",
+    doneWhen: "Tell the Coach when this step is complete.",
+    estimatedMinutes: 10
+  });
+  assert.equal(value.checkpointQuestion, "What did you complete or discover in this step?");
+  assert.equal(value.waitingForStudent, true);
+  assert.equal("nextSteps" in value, false);
+});
+
+test("latestCoachState returns only the latest validated assistant state", () => {
+  const state = latestCoachState([
+    { role: "assistant", text: "First", phase: "understand", waitingForStudent: true },
+    { role: "user", text: "I finished it." },
+    {
+      role: "assistant",
+      text: "Now choose evidence.",
+      phase: "research",
+      currentStep: { id: "find-source", title: "Find one source", instruction: "Find it." },
+      waitingForStudent: true,
+      private: "remove"
+    }
+  ]);
+
+  assert.deepEqual(state, {
+    phase: "research",
+    currentStepId: "find-source",
+    waitingForStudent: true
+  });
+  assert.equal(latestCoachState([{ role: "user", text: "Hello" }]), null);
 });
 
 test("validateCoachResponse keeps rich citations and strips extra fields", () => {
@@ -226,8 +291,17 @@ test("coach client posts bounded history and returns a validated response", asyn
         ok: true,
         json: async () => ({
           answer: "Use the rubric as a checklist.",
+          phase: "review",
+          currentStep: {
+            id: "mark-rubric",
+            title: "Mark one rubric item",
+            instruction: "Choose the rubric item with the weakest evidence.",
+            doneWhen: "You can name the item and the missing evidence.",
+            estimatedMinutes: 8
+          },
+          checkpointQuestion: "Which rubric item needs the most work?",
+          waitingForStudent: true,
           evidence: [{ label: "Rubric", text: "Originality 35%" }],
-          nextSteps: ["Mark each rubric item"],
           missingInformation: [],
           usage: { inputTokens: 200, outputTokens: 60 },
           mode: "live"
@@ -245,5 +319,55 @@ test("coach client posts bounded history and returns a validated response", asyn
   assert.equal(request.options.method, "POST");
   const body = JSON.parse(request.options.body);
   assert.equal(body.messages.length, 8);
+  assert.equal(body.coachState, null);
   assert.equal(response.answer, "Use the rubric as a checklist.");
+  assert.equal(response.currentStep.id, "mark-rubric");
+});
+
+test("coach client sends only the latest sanitized coaching state", async () => {
+  let body;
+  const client = createCoachClient({
+    endpoint: "https://coach.example.test/api/coach",
+    fetchImpl: async (_url, options) => {
+      body = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({
+          answer: "What did you find?",
+          phase: "research",
+          currentStep: null,
+          checkpointQuestion: "What source did you choose?",
+          waitingForStudent: true
+        })
+      };
+    }
+  });
+
+  await client.send({
+    context: buildCoachContext(selectedCourse, selectedCourse.assignments[0]),
+    messages: [
+      {
+        role: "assistant",
+        text: "Find one source.",
+        phase: "research",
+        currentStep: {
+          id: "find-source",
+          title: "Find one source",
+          instruction: "Find one source.",
+          doneWhen: "You can explain it.",
+          estimatedMinutes: 10
+        },
+        waitingForStudent: true,
+        secret: "remove"
+      },
+      { role: "user", text: "I found one." }
+    ]
+  });
+
+  assert.deepEqual(body.coachState, {
+    phase: "research",
+    currentStepId: "find-source",
+    waitingForStudent: true
+  });
+  assert.doesNotMatch(JSON.stringify(body), /secret/);
 });

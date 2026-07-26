@@ -9,6 +9,16 @@
   const ALLOWED_ACTIONS = new Set(["chat", "explain", "check", "plan"]);
   const ALLOWED_LANGUAGES = new Set(["en", "zh", "bilingual"]);
   const ALLOWED_ROLES = new Set(["user", "assistant"]);
+  const ALLOWED_PHASES = new Set([
+    "diagnose",
+    "understand",
+    "research",
+    "ideate",
+    "outline",
+    "draft",
+    "review",
+    "complete"
+  ]);
 
   function cleanText(value, maxLength = 1200) {
     return String(value == null ? "" : value)
@@ -173,8 +183,15 @@
     const timestamp = cleanText(message.timestamp, 80);
     if (timestamp) normalized.timestamp = timestamp;
     if (role === "assistant") {
+      const phase = ALLOWED_PHASES.has(message.phase) ? message.phase : "diagnose";
+      normalized.phase = phase;
+      normalized.currentStep = cleanCurrentStep(message.currentStep) ||
+        legacyCurrentStep(message.nextSteps);
+      normalized.checkpointQuestion = cleanText(message.checkpointQuestion, 1000);
+      normalized.waitingForStudent = typeof message.waitingForStudent === "boolean"
+        ? message.waitingForStudent
+        : phase !== "complete";
       normalized.evidence = cleanEvidence(message.evidence);
-      normalized.nextSteps = cleanStringList(message.nextSteps, 8, 600);
       normalized.missingInformation = cleanStringList(message.missingInformation, 8, 600);
       normalized.mode = ["live", "mock"].includes(message.mode) ? message.mode : "live";
     }
@@ -196,6 +213,20 @@
       bounded[0].text = bounded[0].text.slice(-maxCharacters);
     }
     return bounded;
+  }
+
+  function latestCoachState(messages) {
+    const bounded = boundMessages(messages, 40, 40000);
+    for (let index = bounded.length - 1; index >= 0; index -= 1) {
+      const message = bounded[index];
+      if (message.role !== "assistant") continue;
+      return {
+        phase: message.phase,
+        currentStepId: message.currentStep?.id || "",
+        waitingForStudent: message.waitingForStudent
+      };
+    }
+    return null;
   }
 
   function createThreadStore(storage, options = {}) {
@@ -254,14 +285,55 @@
       .slice(0, 8);
   }
 
+  function cleanCurrentStep(value) {
+    if (!value || typeof value !== "object") return null;
+    const id = cleanId(value.id);
+    const title = cleanText(value.title, 240);
+    const instruction = cleanText(value.instruction, 1200);
+    if (!id || id === "unknown" || !title || !instruction) return null;
+    return {
+      id,
+      title,
+      instruction,
+      doneWhen: cleanText(value.doneWhen, 800),
+      estimatedMinutes: Math.min(60, Math.max(1, Math.round(Number(value.estimatedMinutes) || 10)))
+    };
+  }
+
+  function legacyCurrentStep(values) {
+    const instruction = cleanStringList(values, 1, 600)[0];
+    if (!instruction) return null;
+    return {
+      id: "legacy-step",
+      title: "Next step",
+      instruction,
+      doneWhen: "Tell the Coach when this step is complete.",
+      estimatedMinutes: 10
+    };
+  }
+
   function validateCoachResponse(value) {
     if (!value || typeof value !== "object") throw new TypeError("Coach response must be an object.");
     const answer = cleanText(value.answer, 8000);
     if (!answer) throw new TypeError("Coach response requires an answer.");
+    const suppliedPhase = cleanText(value.phase, 80);
+    if (suppliedPhase && !ALLOWED_PHASES.has(suppliedPhase)) {
+      throw new TypeError("Coach response requires a valid phase.");
+    }
+    const phase = suppliedPhase || "diagnose";
+    const currentStep = cleanCurrentStep(value.currentStep) || legacyCurrentStep(value.nextSteps);
     return {
       answer,
+      phase,
+      currentStep,
+      checkpointQuestion: cleanText(value.checkpointQuestion, 1000) ||
+        (currentStep && !value.currentStep
+          ? "What did you complete or discover in this step?"
+          : ""),
+      waitingForStudent: typeof value.waitingForStudent === "boolean"
+        ? value.waitingForStudent
+        : phase !== "complete",
       evidence: cleanEvidence(value.evidence),
-      nextSteps: cleanStringList(value.nextSteps, 8, 600),
       missingInformation: cleanStringList(value.missingInformation, 8, 600),
       usage: {
         inputTokens: Math.max(0, Math.floor(Number(value.usage?.inputTokens) || 0)),
@@ -287,9 +359,11 @@
           throw createCoachError("The live AI Coach is not connected yet.", "not_configured");
         }
         if (!fetchImpl) throw createCoachError("This browser cannot send Coach requests.", "fetch_unavailable");
+        const boundedHistory = boundMessages(messages, 8, 24000);
         const body = {
           context: context && typeof context === "object" ? context : {},
-          messages: boundMessages(messages, 8, 24000)
+          messages: boundedHistory,
+          coachState: latestCoachState(boundedHistory)
         };
         const encoded = JSON.stringify(body);
         if (encoded.length > 64000) throw createCoachError("The Coach context is too large to send.", "payload_too_large", 413);
@@ -328,6 +402,7 @@
     coachThreadKey,
     createThreadStore,
     createCoachClient,
+    latestCoachState,
     validateCoachResponse
   };
 });
