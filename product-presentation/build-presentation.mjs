@@ -6,9 +6,9 @@ import { Presentation, PresentationFile } from "@oai/artifact-tool";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BUILD = `${ROOT}/product-presentation/.build`;
 const OUTPUT = `${ROOT}/product-presentation/ClassPilot-AI-Product-Introduction.pptx`;
-const DESKTOP = `${BUILD}/coach-desktop.png`;
-const CONVERSATION = `${BUILD}/coach-conversation.png`;
-const CONVERSATION_MOBILE = `${BUILD}/coach-conversation-mobile.png`;
+const DESKTOP = `${BUILD}/coach-adaptive-desktop.png`;
+const CONVERSATION = `${BUILD}/coach-adaptive-desktop.png`;
+const CONVERSATION_MOBILE = `${BUILD}/coach-adaptive-mobile.png`;
 
 const C = {
   ink: "#141C22",
@@ -226,13 +226,13 @@ async function main() {
   // 5. Conversational Coach
   {
     const slide = baseSlide(presentation, "Live AI Coach", 5);
-    title(slide, "The Coach is a real multi-turn conversation.", "Students can ask a question, challenge the answer, request a plan, and act on the next steps without leaving the assignment.");
+    title(slide, "The Coach gives one step, then waits.", "Students can start, continue, get unstuck, or test an idea without receiving a generic plan or a finished answer.");
     shape(slide, "coach-screen-frame", 48, 232, 742, 416, C.paper, C.rule, "roundRect");
-    addImage(slide, conversationBytes, "Live ClassPilot Coach conversation with course evidence and a three-day plan", 62, 246, 714, 388, { left: 0.17, top: 0.1, right: 0, bottom: 0.05 });
+    addImage(slide, conversationBytes, "Live ClassPilot Coach showing one adaptive learning step and student feedback controls", 62, 246, 714, 388, { left: 0.14, top: 0.05, right: 0, bottom: 0.04 });
     const items = [
-      ["FOLLOW UP", "Conversation history stays scoped to the selected course and assignment."],
-      ["VERIFY", "Evidence chips point back to exact due dates, requirements, and rubric text."],
-      ["ACT", "Any suggested next step can be added directly to the assignment checklist."],
+      ["ADAPT", "The next action advances, shrinks, or changes after each student response."],
+      ["VERIFY", "Evidence chips point back to exact dates, requirements, and rubric text."],
+      ["OWN", "The Coach protects student authorship and adds its step to the checklist."],
     ];
     items.forEach((item, i) => {
       const top = 252 + i * 124;
@@ -240,7 +240,7 @@ async function main() {
       textBox(slide, `coach-copy-${i}`, item[1], 830, top + 36, 380, 70, { fontSize: 19, color: C.muted });
       if (i < 2) rule(slide, 830, top + 110, 380);
     });
-    notes(slide, "Show the two-turn live conversation. The Coach first identifies the easiest-to-miss requirement, then converts that advice into a three-day plan with evidence citations and actionable steps.", ["ClassPilot AI live product screenshot and Workers AI response, captured July 25, 2026."]);
+    notes(slide, "Show the live one-step loop. The Coach reads the selected assignment, gives one small action, asks one checkpoint question, and waits for the student before adapting.", ["ClassPilot AI live product screenshot and Workers AI response, captured July 27, 2026."]);
   }
 
   // 6. Planning and submission intelligence
@@ -251,7 +251,7 @@ async function main() {
       ["TODAY", "One-click focus", "Shows one next action, starts a focus session, and advances when a checklist item is completed."],
       ["SCHEDULE", "Adaptive study plan", "Creates calendar sessions from due dates and unfinished work, then replans after progress changes."],
       ["FINAL CHECK", "Submission readiness", "Reads the uploaded file once, checks rubric coverage and deliverables, estimates a score range, and warns when AI-writing signals exceed 20%."],
-      ["CANVAS", "Read-only sync", "Imports active courses, syllabus content, assignments, dates, points, and submission state through scoped OAuth."],
+      ["CANVAS", "Keyless import", "Imports deadlines through a Canvas calendar feed or captures the current Canvas page with the Companion. School OAuth remains optional."],
     ];
     rows.forEach((item, i) => {
       const top = 238 + i * 92;
@@ -261,8 +261,8 @@ async function main() {
       rule(slide, 58, top + 72, 1148);
     });
     shape(slide, "canvas-boundary", 58, 620, 1148, 38, C.goldSoft, C.goldSoft, "roundRect");
-    textBox(slide, "canvas-boundary-text", "Canvas connection code is complete; live school access still requires an administrator-approved Developer Key.", 76, 628, 1112, 24, { fontSize: 15, color: "#725E16", bold: true, alignment: "center" });
-    notes(slide, "Explain how ClassPilot supports execution, not only import. Be transparent that the Canvas OAuth flow is implemented but institutional approval is an external prerequisite.", ["ClassPilot AI Today, study scheduler, submission checker, and Canvas connector implementations, July 2026.", "Canvas LMS OAuth2 documentation: https://developerdocs.instructure.com/services/canvas/oauth2"]);
+    textBox(slide, "canvas-boundary-text", "No Developer Key required: use the Canvas calendar feed or the click-to-capture Companion.", 76, 628, 1112, 24, { fontSize: 15, color: "#725E16", bold: true, alignment: "center" });
+    notes(slide, "Explain how ClassPilot supports execution, not only import. Students without institutional API access can use a local calendar feed or explicitly capture the Canvas page they are viewing.", ["ClassPilot AI Today, study scheduler, submission checker, Canvas calendar feed, and Canvas Companion implementations, July 2026.", "Canvas calendar feed documentation: https://community.canvaslms.com/t5/Student-Guide/How-do-I-view-the-Calendar-iCal-feed/ta-p/1806"]);
   }
 
   // 7. Secure live architecture
@@ -273,7 +273,7 @@ async function main() {
       ["01", "Browser", "Local workspace and scoped conversation"],
       ["02", "Context builder", "Selected course, assignment, and sources"],
       ["03", "Cloudflare Worker", "CORS, size limits, rate limits, validation"],
-      ["04", "Workers AI", "Live answer, citations, next steps"],
+      ["04", "Workers AI", "Live answer, citations, one next step"],
     ];
     nodes.forEach((n, i) => {
       const left = 54 + i * 302;
@@ -286,8 +286,8 @@ async function main() {
         shape(slide, `architecture-arrow-${i}`, left + 284, 370, 18, 18, C.gold, C.gold, "triangle");
       }
     });
-    textBox(slide, "architecture-caption", "No secret is stored in client code. Invalid citations are removed, missing evidence is surfaced, and the Coach is instructed not to write an entire assessed submission.", 54, 548, 1160, 68, { fontSize: 18, color: C.muted });
-    notes(slide, "Use this slide to explain the privacy and academic-integrity boundary. Workers AI is the default live provider; an OpenAI server-side provider remains optional without changing the public response contract.", ["ClassPilot AI Worker and Coach system instructions, July 25, 2026.", "Cloudflare Workers AI bindings: https://developers.cloudflare.com/workers-ai/configuration/bindings/", "Cloudflare Workers AI JSON mode: https://developers.cloudflare.com/workers-ai/features/json-mode/"]);
+    textBox(slide, "architecture-caption", "No secret is stored in client code. Invalid citations are removed, malformed model output is repaired, and complete assessed submissions are redirected into student-owned reasoning.", 54, 548, 1160, 68, { fontSize: 18, color: C.muted });
+    notes(slide, "Use this slide to explain the privacy and academic-integrity boundary. The Worker validates every response and recovers a useful model-generated action when the model places it in the wrong field.", ["ClassPilot AI Worker and Coach response contract, July 27, 2026.", "Cloudflare Workers AI bindings: https://developers.cloudflare.com/workers-ai/configuration/bindings/", "Cloudflare Workers AI JSON mode: https://developers.cloudflare.com/workers-ai/features/json-mode/"]);
   }
 
   // 8. Validation
@@ -295,7 +295,7 @@ async function main() {
     const slide = baseSlide(presentation, "Validation", 8);
     title(slide, "The complete workflow is tested, not staged.", "Automated contracts and live browser QA cover import, planning, submission checks, Canvas boundaries, and multi-turn Coach behavior.");
     const stats = [
-      ["326", "automated tests passing"],
+      ["365", "automated tests passing"],
       ["0", "browser console errors"],
       ["390", "px mobile width verified"],
     ];
@@ -306,12 +306,12 @@ async function main() {
       textBox(slide, `stat-value-${i}`, s[0], left + 14, top + 16, 130, 56, { fontSize: 43, color: i === 0 ? C.teal : C.ink, bold: true });
       textBox(slide, `stat-label-${i}`, s[1], left + 14, top + 76, 130, 36, { fontSize: 13, color: C.muted, bold: true });
     });
-    textBox(slide, "validation-list", "VERIFIED FLOWS\n\nScreenshots and documents -> exact course and assignment facts\nCourse-bound upload -> no duplicate course split\nToday and scheduler -> next action and replanning\nFinal check -> rubric coverage, score range, AI-writing reminder\nCoach -> two live turns, citations, readable three-day plan", 58, 422, 620, 214, { fontSize: 17, color: C.muted });
+    textBox(slide, "validation-list", "VERIFIED FLOWS\n\nScreenshots and documents -> exact course and assignment facts\nCourse-bound upload -> no duplicate course split\nToday and scheduler -> next action and replanning\nFinal check -> rubric coverage, score range, AI-writing reminder\nCoach -> start, advance, stuck support, and authorship protection", 58, 422, 620, 214, { fontSize: 17, color: C.muted });
     shape(slide, "mobile-frame", 782, 228, 292, 454, C.ink, C.ink, "roundRect");
-    addImage(slide, conversationMobileBytes, "ClassPilot AI mobile Coach conversation without horizontal overflow", 796, 242, 264, 426);
+    addImage(slide, conversationMobileBytes, "ClassPilot AI mobile Coach showing one adaptive step and full feedback controls", 796, 242, 264, 426, { left: 0, top: 0.03, right: 0, bottom: 0.03 });
     label(slide, "Mobile QA", 1090, 270, 126, C.goldSoft, "#725E16");
-    textBox(slide, "mobile-callout", "No page or transcript overflow at 390 x 844. The live Coach returned citations and a readable multi-day plan.", 1090, 322, 134, 190, { fontSize: 17, color: C.muted });
-    notes(slide, "Share the verification evidence: 326 automated tests passed, the public product had no browser console errors, and the 390-pixel mobile layout had no page or transcript overflow.", ["ClassPilot AI test suite and public browser QA, July 25, 2026.", "ClassPilot AI live mobile product screenshot, captured July 25, 2026."]);
+    textBox(slide, "mobile-callout", "No horizontal overflow at 390 x 844. The current step and all three feedback actions remain usable.", 1090, 322, 134, 190, { fontSize: 17, color: C.muted });
+    notes(slide, "Share the verification evidence: 365 automated tests passed, the public product had no Coach error, and the 390-pixel mobile layout had no horizontal overflow with exactly one interactive step.", ["ClassPilot AI test suite and public browser QA, July 27, 2026.", "ClassPilot AI live mobile product screenshot, captured July 27, 2026."]);
   }
 
   // 9. Close
@@ -325,7 +325,7 @@ async function main() {
     textBox(slide, "close-link-label", "LIVE PRODUCT", 872, 270, 306, 24, { fontSize: 13, color: C.goldSoft, bold: true, alignment: "center" });
     textBox(slide, "close-link-url", "cngei2.github.io/\nclasspilot-ai-website/", 872, 306, 306, 54, { fontSize: 19, color: C.paper, bold: true, alignment: "center" });
     textBox(slide, "close-note", "The public product now includes live multi-turn AI, evidence citations, planning, final checks, and responsive mobile support.", 840, 416, 370, 118, { fontSize: 17, color: "#CAD1D4" });
-    notes(slide, "Close on the product promise and open the live URL. The Coach is online through Workers AI; Canvas sync will become active after the school approves a Developer Key.", ["ClassPilot AI live product: https://cngei2.github.io/classpilot-ai-website/", "ClassPilot AI Worker deployment: https://classpilot-ai-coach.cngei2-classpilot.workers.dev"]);
+    notes(slide, "Close on the product promise and open the live URL. The Coach is online through Workers AI, while Canvas calendar feed and Companion imports work without a Developer Key.", ["ClassPilot AI live product: https://cngei2.github.io/classpilot-ai-website/", "ClassPilot AI Worker deployment: https://classpilot-ai-coach.cngei2-classpilot.workers.dev"]);
   }
 
   for (const [index, slide] of presentation.slides.items.entries()) {
